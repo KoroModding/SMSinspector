@@ -2,7 +2,7 @@
 
 SMSinspector has two projects. `SMSinspector.Core` holds everything that does not draw pixels: memory access, and later symbols, layouts and object discovery. `SMSinspector.App` is the Avalonia front end. Tests cover Core only, against fakes, so they run anywhere without Dolphin or the game.
 
-This page grows with each milestone. Right now it covers memory access.
+This page grows with each milestone. Right now it covers memory access and symbols.
 
 ## Memory access
 
@@ -60,3 +60,42 @@ The class is not thread-safe. The app polls from one task at a time.
 ### Reading without allocating
 
 `IGameMemory.TryRead` fills a caller-provided `Span<byte>`. The typed reads use `stackalloc` buffers and `BinaryPrimitives`, so reading a field in the refresh loop allocates nothing. The Try forms return false on failure; the plain forms throw `GameMemoryReadException`, which is easier for one-off reads.
+
+## Symbols
+
+### Where they come from
+
+The game's executable carries no symbol names. The doldecomp/sms project keeps one in `config/GMSP01/symbols.txt`, one line per symbol:
+
+```
+update__9TFooActorFv = .text:0x80010000; // type:function size:0x40 scope:global align:4
+```
+
+SMSinspector reads that file from the user's clone at startup (`DecompRepository`, `SymbolFile`). It never ships a copy. The example above, like every name in the tests, is invented.
+
+`SymbolTable` indexes the symbols by name and by address. Names are not unique: the compiler emits many local constants called `@123`, so a lookup by name returns every match, and `TryGetUnique` only succeeds when there is one. A lookup by address uses the sizes from the file, so an address that falls in a gap between two symbols stays unknown instead of being blamed on the previous one.
+
+### Demangling
+
+The game was built with Metrowerks CodeWarrior, whose name mangling differs from the GCC and Clang one, so `c++filt` cannot read it. `CodeWarriorDemangler` handles what the game's symbols use:
+
+| Mangled | Demangled |
+|---|---|
+| `update__9TFooActorFv` | `TFooActor::update()` |
+| `draw__Q23Gfx7TCanvasCFi` | `Gfx::TCanvas::draw(int) const` (Q2: two nested scopes) |
+| `__vt__20TStack<PC9TFooActor>` | vtable of `TStack<const TFooActor*>` |
+| `@16@__dt__9TFooActorFv` | `TFooActor::~TFooActor()`, through a thunk that adjusts `this` |
+
+The number before each name is its length. Template arguments sit inside that length and are mangled types themselves, so the demangler parses them recursively. When a name does not parse, it is shown as it is rather than guessed.
+
+### Vtables and class identification
+
+A C++ object with virtual functions holds a pointer to its class's table of virtual functions, the vtable. For the classes SMSinspector cares about, everything derived from `JDrama::TNameRef`, that pointer is the object's first word. Classes outside that hierarchy may keep it elsewhere, and classes with several polymorphic bases have more than one. The decomp names each vtable `__vt__<class>`. `VtableIndex` collects them, and `ObjectIdentifier` reads the first word of an object and finds which vtable it points into. That gives the object's class without any other information.
+
+The pointer does not have to land exactly on the vtable symbol: the compiler can put a small header before the function pointers. `VtableIndex.TryResolve` returns the offset into the vtable, and the diagnostic window shows it for Mario. That measured offset decides how object discovery will match vtable pointers later.
+
+`GlobalObjectProbe` chains these steps for a global pointer variable: look up `gpMarioAddress` in the symbols, read it, follow it to the object, identify the object.
+
+### Linker map
+
+The original linker map lists functions the linker removed because nothing called them (marked UNUSED). The decomp does not ship it; users who have it put it with their game files. `DecompRepository.LocateLinkerMap` hardcodes no file name: it reads the `map:` line of `config/GMSP01/config.yml`, and if that file does not exist it looks for a single `*.MAP` in `orig/GMSP01/files/`. The diagnostic window says which file it used, or why it used none.
