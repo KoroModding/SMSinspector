@@ -12,9 +12,12 @@ TestResults/
 *.trx
 *.coverage
 
-# Settings and caches written by SMSinspector at runtime
+# Settings, caches and reports written by SMSinspector. By default they go to the
+# user data folder; these entries catch copies made inside the tree.
 *.smsicache
 smsinspector.settings.json
+*.local.json
+/reports/
 
 # Game data and decomp files never belong here (CI rejects them too)
 *.iso
@@ -28,4 +31,5 @@ smsinspector.settings.json
 *.bti
 *.aw
 *.MAP
+*.s
 symbols.txt

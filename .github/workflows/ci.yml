@@ -34,10 +34,12 @@ jobs:
             exit 1
           fi
 
-      - name: Game data and decomp files
+      # .s covers the decomp's disassembly; reports/ is where extractor output would land
+      # if someone exported it into the tree by mistake.
+      - name: Game data, decomp files and generated reports
         run: |
-          if git ls-files | grep -i -E '\.(iso|gcm|rvz|dol|rel|szs|arc|bmd|bti|aw|map)$|(^|/)symbols\.txt$'; then
-            echo "::error::Game data or decomp file tracked (see list above)."
+          if git ls-files | grep -i -E '\.(iso|gcm|rvz|dol|rel|szs|arc|bmd|bti|aw|map|s)$|(^|/)symbols\.txt$|^reports/'; then
+            echo "::error::Game data, decomp file or generated report tracked (see list above)."
             exit 1
           fi
 
