@@ -6,7 +6,9 @@ Instead of reading `0x8123A4C0 + 0x1A4` by hand and guessing, you see the class,
 
 ## Status
 
-Early work. The repository holds the project skeleton and CI; nothing reads the game yet. The roadmap, in order: memory access, symbols, layouts from the decomp headers, object discovery, the live UI, then tools to help name fields (timeline, what changed between two moments, CSV export, evidence notes for decomp PRs).
+Early work. SMSinspector finds a running Dolphin, checks that it runs the PAL game, and reads its memory; the window only shows connection diagnostics for now. Still to come, in order: symbols, layouts from the decomp headers, object discovery, the live UI, then tools to help name fields (timeline, what changed between two moments, CSV export, evidence notes for decomp PRs).
+
+How it works: [docs/architecture.md](docs/architecture.md).
 
 ## Scope
 
