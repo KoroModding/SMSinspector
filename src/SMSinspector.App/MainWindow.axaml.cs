@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using SMSinspector.App.ViewModels;
@@ -16,6 +17,18 @@ public partial class MainWindow : Window
         DataContext = _viewModel;
         Opened += async (_, _) => await _viewModel.StartAsync();
         Closed += (_, _) => _viewModel.Dispose();
+    }
+
+    private void OnShowClass(object? sender, RoutedEventArgs e) => _viewModel.ShowClass();
+
+    private void OnSaveReport(object? sender, RoutedEventArgs e) => _viewModel.SaveReport();
+
+    private void OnClassQueryKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            _viewModel.ShowClass();
+        }
     }
 
     private async void OnChooseDecompFolder(object? sender, RoutedEventArgs e)

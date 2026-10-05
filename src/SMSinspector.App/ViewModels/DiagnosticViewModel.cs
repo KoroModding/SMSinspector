@@ -2,6 +2,7 @@ using System.Text;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using SMSinspector.App.Settings;
+using SMSinspector.Core.Layouts;
 using SMSinspector.Core.Memory;
 using SMSinspector.Core.Memory.Windows;
 using SMSinspector.Core.Symbols;
@@ -9,9 +10,9 @@ using SMSinspector.Core.Symbols;
 namespace SMSinspector.App.ViewModels;
 
 /// <summary>
-/// Diagnostics for the first milestones: the Dolphin connection, the decomp clone and
-/// its symbols, and a live probe that follows gpMarioAddress to Mario and identifies
-/// the object from its vtable pointer.
+/// Diagnostics for the first milestones: the Dolphin connection, the decomp clone with
+/// its symbols and class layouts, and a live probe that follows gpMarioAddress to Mario
+/// and identifies the object from its vtable pointer.
 /// </summary>
 public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
 {
@@ -21,6 +22,7 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
     private readonly DolphinConnection? _connection;
     private readonly DispatcherTimer _timer;
     private volatile LoadedDecomp? _decomp;
+    private LoadedLayouts? _layouts;
     private AppSettings _settings;
     private bool _polling;
 
@@ -47,6 +49,21 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private string _marioReport = "";
+
+    [ObservableProperty]
+    private string _layoutStatus = "";
+
+    [ObservableProperty]
+    private bool _areLayoutsLoaded;
+
+    [ObservableProperty]
+    private string _classQuery = "TMario";
+
+    [ObservableProperty]
+    private string _classLayoutText = "";
+
+    [ObservableProperty]
+    private string _reportPath = "";
 
     public DiagnosticViewModel()
     {
@@ -118,6 +135,8 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
             return;
         }
 
+        _ = LoadLayoutsAsync(repository);
+
         if (save)
         {
             _settings = _settings with { DecompPath = repository.Root };
@@ -125,6 +144,62 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
             {
                 DecompStatus += Environment.NewLine + $"Could not save the settings in {SettingsStore.DataFolder}.";
             }
+        }
+    }
+
+    /// <summary>Shows the PAL layout of the class named in <see cref="ClassQuery"/>.</summary>
+    public void ShowClass()
+    {
+        if (_layouts is null)
+        {
+            ClassLayoutText = "Layouts are not loaded yet.";
+            return;
+        }
+
+        var layout = _layouts.Find(ClassQuery, VersionMask.Pal);
+        ClassLayoutText = layout is null
+            ? $"No class named '{ClassQuery.Trim()}' (templates need their arguments, for example TVec3<f32>)."
+            : LayoutText.Describe(layout);
+    }
+
+    /// <summary>Writes the full validation report to the reports folder in the user data folder.</summary>
+    public void SaveReport()
+    {
+        if (_layouts is null || _decomp is not { } decomp)
+        {
+            return;
+        }
+
+        var commit = decomp.CommitHash?[..12];
+        var folder = Path.Combine(SettingsStore.DataFolder, "reports");
+        var path = Path.Combine(folder, $"layout-report-{commit ?? "unknown"}.txt");
+        try
+        {
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(path, _layouts.Report.ToText(commit));
+            ReportPath = $"Saved to {path}";
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            ReportPath = $"Could not save the report: {e.Message}";
+        }
+    }
+
+    private async Task LoadLayoutsAsync(DecompRepository repository)
+    {
+        AreLayoutsLoaded = false;
+        LayoutStatus = "Parsing headers...";
+        try
+        {
+            _layouts = await Task.Run(() => LoadedLayouts.Load(repository));
+            AreLayoutsLoaded = true;
+            LayoutStatus = _layouts.Report.Summary();
+            ShowClass();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _layouts = null;
+            LayoutStatus = $"Could not read the headers: {e.Message}";
         }
     }
 

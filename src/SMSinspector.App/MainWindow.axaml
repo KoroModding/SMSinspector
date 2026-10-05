@@ -44,6 +44,20 @@
       <SelectableTextBlock Classes="mono" Text="{Binding DecompStatus}" TextWrapping="Wrap"
                            IsVisible="{Binding DecompStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
+      <StackPanel Spacing="8" IsVisible="{Binding LayoutStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+        <TextBlock Classes="heading" Text="Layouts" Margin="0,8,0,0" />
+        <SelectableTextBlock Classes="mono" Text="{Binding LayoutStatus}" TextWrapping="Wrap" />
+        <StackPanel Orientation="Horizontal" Spacing="12" IsVisible="{Binding AreLayoutsLoaded}">
+          <Button Content="Save full report" Click="OnSaveReport" />
+          <SelectableTextBlock Text="{Binding ReportPath}" VerticalAlignment="Center" TextWrapping="Wrap" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Spacing="12" IsVisible="{Binding AreLayoutsLoaded}">
+          <TextBox Text="{Binding ClassQuery}" Width="320" PlaceholderText="Class name, for example TMario" KeyDown="OnClassQueryKeyDown" />
+          <Button Content="Show PAL layout" Click="OnShowClass" />
+        </StackPanel>
+        <SelectableTextBlock Classes="mono" Text="{Binding ClassLayoutText}" IsVisible="{Binding AreLayoutsLoaded}" />
+      </StackPanel>
+
       <StackPanel Spacing="6" IsVisible="{Binding IsConnected}">
         <TextBlock Classes="heading" Text="Mario" Margin="0,8,0,0" />
         <TextBlock Text="gpMarioAddress, followed live to the object and its vtable" Opacity="0.7" />
