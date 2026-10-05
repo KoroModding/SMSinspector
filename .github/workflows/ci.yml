@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  guards:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # This file defines the forbidden words, so it is the only file excluded from the scan.
+      - name: Forbidden words in tracked files
+        run: |
+          emdash=$(printf '\xe2\x80\x94')
+          pattern="WriteProcessMemory|PROCESS_VM_WRITE|PROCESS_VM_OPERATION|Co-Authored-By|Claude|Anthropic|${emdash}"
+          if git grep -n -I -i -E "$pattern" -- . ':!.github/workflows/ci.yml'; then
+            echo "::error::Forbidden word found in tracked files (see list above)."
+            exit 1
+          fi
+
+      - name: Forbidden words in commit messages
+        run: |
+          emdash=$(printf '\xe2\x80\x94')
+          pattern="WriteProcessMemory|PROCESS_VM_WRITE|PROCESS_VM_OPERATION|Co-Authored-By|Claude|Anthropic|${emdash}"
+          if git log --format='%H %B' HEAD | grep -n -i -E "$pattern"; then
+            echo "::error::Forbidden word found in a commit message."
+            exit 1
+          fi
+
+      - name: Game data and decomp files
+        run: |
+          if git ls-files | grep -i -E '\.(iso|gcm|rvz|dol|rel|szs|arc|bmd|bti|aw|map)$|(^|/)symbols\.txt$'; then
+            echo "::error::Game data or decomp file tracked (see list above)."
+            exit 1
+          fi
+
+  build:
+    runs-on: windows-latest
+    needs: guards
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build SMSinspector.sln -c Release
+
+      - name: Test
+        run: dotnet test SMSinspector.sln -c Release --no-build

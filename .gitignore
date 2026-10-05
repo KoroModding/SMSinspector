@@ -1,0 +1,31 @@
+# Build output
+bin/
+obj/
+artifacts/
+publish/
+*.user
+*.suo
+.vs/
+.idea/
+.vscode/
+TestResults/
+*.trx
+*.coverage
+
+# Settings and caches written by SMSinspector at runtime
+*.smsicache
+smsinspector.settings.json
+
+# Game data and decomp files never belong here (CI rejects them too)
+*.iso
+*.gcm
+*.rvz
+*.dol
+*.rel
+*.szs
+*.arc
+*.bmd
+*.bti
+*.aw
+*.MAP
+symbols.txt
