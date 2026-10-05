@@ -2,7 +2,7 @@
 
 SMSinspector has two projects. `SMSinspector.Core` holds everything that does not draw pixels: memory access, and later symbols, layouts and object discovery. `SMSinspector.App` is the Avalonia front end. Tests cover Core only, against fakes, so they run anywhere without Dolphin or the game.
 
-This page grows with each milestone. Right now it covers memory access and symbols.
+This page grows with each milestone. Right now it covers memory access, symbols and class layouts.
 
 ## Memory access
 
@@ -99,3 +99,39 @@ The pointer does not have to land exactly on the vtable symbol: the compiler can
 ### Linker map
 
 The original linker map lists functions the linker removed because nothing called them (marked UNUSED). The decomp does not ship it; users who have it put it with their game files. `DecompRepository.LocateLinkerMap` hardcodes no file name: it reads the `map:` line of `config/GMSP01/config.yml`, and if that file does not exist it looks for a single `*.MAP` in `orig/GMSP01/files/`. The diagnostic window says which file it used, or why it used none.
+
+## Class layouts
+
+### What is read
+
+Every header under `include/` and `libs/*/include/` in the user's clone, including the C++ library headers that have no extension (`cstdint`). Parsing and laying out the whole decomp takes well under a second, so nothing is cached.
+
+`HeaderParser` is not a C++ parser. It knows namespaces, class and struct definitions with their bases, data members with their offset comments, enums, typedefs, `using` aliases, templates with default arguments and explicit specializations, and plain integer constants. Function bodies, initializers and anything else are skipped by matching brackets. A statement in a class body that looks like a data member but cannot be read is listed in the report rather than guessed.
+
+### Versions
+
+The headers describe two builds at once. Code inside `#ifdef VERSION_GMSP01` exists only in PAL, its `#else` branch only in JP. `HeaderLexer` keeps both branches and tags every token with the versions it belongs to; other preprocessor conditions are evaluated once, the way the game's compiler saw them. `VERSION_SELECT(GMSJ01(a), GMSP01(b))` is expanded per version wherever a constant is evaluated, for example in an array size.
+
+The offset comments follow one convention, which the engine relies on: a comment outside any version block, or inside a JP-only block, is a JP offset. A comment inside a PAL-only block is a PAL offset.
+
+### JP: checking the comments
+
+`LayoutEngine` walks each class and computes every member's offset from what precedes it: base classes, hidden pointers, the sizes and alignments of earlier members. Where a comment exists, it compares. The comment stays the displayed offset either way, since it is what the decomp says; the comparison measures how far the size model can be trusted, and every disagreement goes into the report.
+
+The rules it applies are those of the game's compiler (Metrowerks CodeWarrior for PowerPC):
+
+- Pointers, references and function pointers take 4 bytes. Enums take 4 bytes unless they name another type.
+- A class that is the first in its hierarchy to have virtual functions gets its vtable pointer where its first virtual function is declared, after the data members declared before it. `JDrama::TNameRef` declares its virtual functions first, so its vtable pointer is at offset 0; `TSpineBase` declares them last, so it is after the members. A `/* 0x24 */ // vt` comment in a header confirms the position.
+- A class with a virtual base keeps a pointer to it; the virtual base itself is placed once, at the end of the complete object. A class used as a base takes its size without virtual bases.
+- Consecutive bit-fields of the same type share a storage unit of that type, filled from the most significant bit.
+- `__attribute__((aligned(N)))` raises a member's alignment. An empty base takes no room. A trailing `T data[]` takes none either.
+
+### PAL: deriving the offsets
+
+A class whose PAL layout cannot differ (no version block in it, and no base or member type whose size differs between versions) keeps its JP offsets.
+
+Otherwise the engine walks it again with the PAL members. Comments inside PAL-only blocks are checked like JP comments are. A member present in both versions moves by the shift accumulated before it, which is exact as long as that shift keeps the member's alignment. When it does not (a 2-byte insertion before a 4-byte field, say), the offset is recomputed from the preceding sizes, but only if the JP walk reproduced that member's comment, which proves the sizes involved. If neither holds, the engine stops: the class says "PAL offsets unverified after 0xNN" and later offsets are left blank instead of guessed.
+
+### Report
+
+`LayoutReport` covers every class: how many JP comments the computation reproduces, the classes whose PAL layout differs and how each member moves, and every disagreement found (gaps the header does not account for, overlaps, comments out of order, types that could not be sized). A disagreement can be a wrong comment, a wrong type in the header, or a rule this tool gets wrong; the report does not decide which. Saved from the app, it goes to `%APPDATA%\SMSinspector\reports\`, never into the repository.

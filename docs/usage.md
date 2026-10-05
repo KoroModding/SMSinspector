@@ -31,6 +31,23 @@ If you stop the emulation or restart Dolphin, SMSinspector notices and reconnect
 
 SMSinspector only reads Dolphin's memory. It cannot change anything in the game.
 
+## Class layouts
+
+Once the decomp folder is set, SMSinspector reads every header of the clone and lays out every class, for JP and PAL. The **Layouts** section shows a summary: how many classes, how many JP offset comments the computation reproduces, how many classes differ in PAL.
+
+Type a class name (`TMario`, `JDrama::TNameRef`, or `TVec3<f32>` for a template) and press **Show PAL layout**. You get every field in memory order, base classes first, with its offset, size, type and a note:
+
+- **comment, verified**: the offset comes from the header and the computation reproduces it.
+- **comment**: from the header, but nothing before it could be sized to check it.
+- **computed**: no comment in the header; the offset follows from the sizes before it.
+- **moved from JP 0x..**: PAL places this member elsewhere because of a version block before it.
+- **PAL only**: the member exists only in the PAL build.
+- **(padding)**: bytes an alignment explains. **(gap)**: bytes nothing in the header explains.
+
+When PAL offsets cannot be derived safely, the layout ends with "PAL offsets unverified after 0x.." and the later offsets show as `?`.
+
+**Save full report** writes the complete validation report, with every disagreement between the headers and the computation, to `%APPDATA%\SMSinspector\reports\layout-report-<commit>.txt`. It can be useful to the decomp project as it is.
+
 ## Optional: the original linker map
 
 The original linker map adds the functions the linker removed (UNUSED), which the name extractor will use. It is not part of the decomp. If you have it, put it with your game files under `orig/GMSP01/files/` in the clone. SMSinspector looks for it at the path named by the `map:` line of `config/GMSP01/config.yml`, then for any `.MAP` file in `orig/GMSP01/files/`, and the **Decomp** section says which file it used or why it used none.
