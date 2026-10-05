@@ -4,28 +4,51 @@
         x:Class="SMSinspector.App.MainWindow"
         x:DataType="vm:DiagnosticViewModel"
         Title="SMSinspector"
-        Width="900" Height="500"
+        Width="960" Height="720"
         FontFeatures="-calt">
-  <StackPanel Margin="24" Spacing="16">
-    <TextBlock Text="Connection" FontSize="20" FontWeight="SemiBold" />
+  <Window.Styles>
+    <Style Selector="SelectableTextBlock.mono">
+      <Setter Property="FontFamily" Value="Consolas, Menlo, monospace" />
+    </Style>
+    <Style Selector="TextBlock.heading">
+      <Setter Property="FontSize" Value="20" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+  </Window.Styles>
 
-    <StackPanel Orientation="Horizontal" Spacing="10">
-      <Ellipse Width="12" Height="12" VerticalAlignment="Center"
-               Fill="#C0392B"
-               IsVisible="{Binding !IsConnected}" />
-      <Ellipse Width="12" Height="12" VerticalAlignment="Center"
-               Fill="#27AE60"
-               IsVisible="{Binding IsConnected}" />
-      <SelectableTextBlock Text="{Binding Status}" TextWrapping="Wrap" VerticalAlignment="Center" />
+  <ScrollViewer>
+    <StackPanel Margin="24" Spacing="16">
+      <TextBlock Classes="heading" Text="Connection" />
+
+      <StackPanel Orientation="Horizontal" Spacing="10">
+        <Ellipse Width="12" Height="12" VerticalAlignment="Center" Fill="#C0392B" IsVisible="{Binding !IsConnected}" />
+        <Ellipse Width="12" Height="12" VerticalAlignment="Center" Fill="#27AE60" IsVisible="{Binding IsConnected}" />
+        <SelectableTextBlock Text="{Binding Status}" TextWrapping="Wrap" VerticalAlignment="Center" />
+      </StackPanel>
+
+      <SelectableTextBlock Classes="mono" Text="{Binding Details}"
+                           IsVisible="{Binding Details, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+      <StackPanel Spacing="6" IsVisible="{Binding IsConnected}">
+        <TextBlock Text="MEM1 header, read through the game address space" Opacity="0.7" />
+        <SelectableTextBlock Classes="mono" Text="{Binding HeaderDump}" />
+      </StackPanel>
+
+      <TextBlock Classes="heading" Text="Decomp" Margin="0,8,0,0" />
+
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <Button Content="Choose decomp folder..." Click="OnChooseDecompFolder" />
+        <SelectableTextBlock Text="{Binding DecompPath}" VerticalAlignment="Center" TextWrapping="Wrap" />
+      </StackPanel>
+
+      <SelectableTextBlock Classes="mono" Text="{Binding DecompStatus}" TextWrapping="Wrap"
+                           IsVisible="{Binding DecompStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+      <StackPanel Spacing="6" IsVisible="{Binding IsConnected}">
+        <TextBlock Classes="heading" Text="Mario" Margin="0,8,0,0" />
+        <TextBlock Text="gpMarioAddress, followed live to the object and its vtable" Opacity="0.7" />
+        <SelectableTextBlock Classes="mono" Text="{Binding MarioReport}" TextWrapping="Wrap" />
+      </StackPanel>
     </StackPanel>
-
-    <SelectableTextBlock Text="{Binding Details}"
-                         FontFamily="Consolas, Menlo, monospace"
-                         IsVisible="{Binding Details, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-
-    <StackPanel Spacing="6" IsVisible="{Binding IsConnected}">
-      <TextBlock Text="MEM1 header, read through the game address space" Opacity="0.7" />
-      <SelectableTextBlock Text="{Binding HeaderDump}" FontFamily="Consolas, Menlo, monospace" />
-    </StackPanel>
-  </StackPanel>
+  </ScrollViewer>
 </Window>
