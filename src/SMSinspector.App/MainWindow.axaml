@@ -4,7 +4,8 @@
         x:Class="SMSinspector.App.MainWindow"
         x:DataType="vm:DiagnosticViewModel"
         Title="SMSinspector"
-        Width="900" Height="500">
+        Width="900" Height="500"
+        FontFeatures="-calt">
   <StackPanel Margin="24" Spacing="16">
     <TextBlock Text="Connection" FontSize="20" FontWeight="SemiBold" />
 
