@@ -67,10 +67,16 @@ public static partial class NameExtractor
         return null;
     }
 
+    /// <summary>
+    /// Runs the extractor. The main.dol check (<see cref="DolLayoutCheck"/>) runs first and
+    /// hands its contradictions to <paramref name="engine"/>, so no candidate lands on an
+    /// offset the game's code contradicts.
+    /// </summary>
     public static ExtractionReport Run(LayoutEngine engine, NameSources sources, VersionMask version = VersionMask.Pal)
     {
-        var context = new Context(engine, version);
+        var layoutCheck = version == VersionMask.Pal ? DolLayoutCheck.Apply(engine, sources) : LayoutCheckResult.NotRun;
         var stats = new ExtractionStats();
+        var context = new Context(engine, version, stats);
 
         foreach (var decl in engine.Catalog.AllClasses.Where(c => !c.IsTemplate && c.SpecializationArgs is null))
         {
@@ -87,7 +93,7 @@ public static partial class NameExtractor
             .ThenBy(m => m.Offset)
             .ToList();
 
-        return new ExtractionReport(sources, stats, members);
+        return new ExtractionReport(sources, stats, members, layoutCheck);
     }
 
     private static void LinkDolAccessors(Context context, NameSources sources, ExtractionStats stats)
@@ -336,7 +342,7 @@ public static partial class NameExtractor
         }
     }
 
-    private sealed class Context(LayoutEngine engine, VersionMask version)
+    private sealed class Context(LayoutEngine engine, VersionMask version, ExtractionStats stats)
     {
         public Dictionary<string, ClassLayout?> Layouts { get; } = new(StringComparer.Ordinal);
 
@@ -352,7 +358,16 @@ public static partial class NameExtractor
                 {
                     foreach (var field in layout.Fields)
                     {
-                        if (field.Member?.Kind == MemberKind.Data && field.Offset is not null && IsUnknownName(field.Name))
+                        if (field.Member?.Kind != MemberKind.Data || !IsUnknownName(field.Name))
+                        {
+                            continue;
+                        }
+
+                        if (field.Offset is null)
+                        {
+                            stats.UnknownWithoutOffset++;
+                        }
+                        else
                         {
                             Unknown.TryAdd((layout.Name, field.Name), new PendingMember(layout, field, layout.Decl.File));
                         }

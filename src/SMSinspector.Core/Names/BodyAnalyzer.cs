@@ -70,6 +70,29 @@ public static class BodyAnalyzer
         return function.Body.Count(t => t.Is(";")) <= MaxShortStatements ? BodyShape.Short : BodyShape.Long;
     }
 
+    /// <summary>
+    /// The member a body returns or assigns from a parameter, whatever its name: "mSpeed" for
+    /// <c>return mSpeed;</c> or <c>this->mSpeed = speed;</c>. Null for any other body.
+    /// </summary>
+    public static string? SingleMember(FunctionBody function)
+    {
+        var tokens = StripThis(function.Body);
+        if (tokens is [{ Text: "return" }, var returned, { Text: ";" }]
+            && returned.Kind == TokenKind.Identifier && !function.Parameters.Contains(returned.Text))
+        {
+            return returned.Text;
+        }
+
+        if (tokens is [var assigned, { Text: "=" }, var value, { Text: ";" }]
+            && assigned.Kind == TokenKind.Identifier && !function.Parameters.Contains(assigned.Text)
+            && value.Kind == TokenKind.Identifier && function.Parameters.Contains(value.Text))
+        {
+            return assigned.Text;
+        }
+
+        return null;
+    }
+
     /// <summary>The body on one line, for the report.</summary>
     public static string Format(IReadOnlyList<HeaderToken> body)
     {

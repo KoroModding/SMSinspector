@@ -33,10 +33,13 @@ public sealed class ExtractionStats
 
     public int BodyReferencesNotFound { get; set; }
 
+    /// <summary>unkXX members left out because their PAL offset is withheld.</summary>
+    public int UnknownWithoutOffset { get; set; }
+
     public void CountShape(AccessorShape shape) => Shapes[shape] = Shapes.GetValueOrDefault(shape) + 1;
 }
 
-public sealed record ExtractionReport(NameSources Sources, ExtractionStats Stats, IReadOnlyList<UnknownMember> Members)
+public sealed record ExtractionReport(NameSources Sources, ExtractionStats Stats, IReadOnlyList<UnknownMember> Members, LayoutCheckResult LayoutCheck)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -74,6 +77,7 @@ public sealed record ExtractionReport(NameSources Sources, ExtractionStats Stats
         }
 
         lines.Add($"Original methods: {Sources.Methods.Count:N0}.");
+        lines.Add(LayoutCheck.Summary());
         lines.Add($"main.dol: {Sources.Executable.Message}");
         lines.Add($"Linker map: {Sources.MapMessage}");
         return string.Join(Environment.NewLine, lines);
@@ -105,6 +109,19 @@ public sealed record ExtractionReport(NameSources Sources, ExtractionStats Stats
         }
 
         text.AppendLine();
+        text.AppendLine("== main.dol against the layouts ==");
+        text.AppendLine(LayoutCheck.Summary());
+        foreach (var check in LayoutCheck.Disagreements)
+        {
+            text.AppendLine($"  {check.ClassName}: {check.Method} is `{check.Instruction}`; the decomp body ({check.BodyLocation}) uses {check.Member}, at 0x{check.LayoutOffset:X} in the layout.");
+        }
+
+        foreach (var contradiction in LayoutCheck.Withheld)
+        {
+            text.AppendLine($"  -> {contradiction.ClassName}: PAL offsets withheld from 0x{contradiction.FirstOffset:X}.");
+        }
+
+        text.AppendLine();
         text.AppendLine("== Not interpreted ==");
         if (Sources.Executable.IsUsable)
         {
@@ -129,6 +146,7 @@ public sealed record ExtractionReport(NameSources Sources, ExtractionStats Stats
         text.AppendLine($"Decomp bodies with an original name but longer than {BodyAnalyzer.MaxShortStatements} statements: {Stats.BodiesTooLong:N0}");
         text.AppendLine($"Decomp bodies of a class without a layout: {Stats.BodiesWithoutLayout:N0}");
         text.AppendLine($"unkXX names in bodies not found in the class layout: {Stats.BodyReferencesNotFound:N0}");
+        text.AppendLine($"unkXX members left out because their PAL offset is withheld: {Stats.UnknownWithoutOffset:N0}");
         text.AppendLine();
 
         text.AppendLine("== Members with candidates ==");
@@ -172,6 +190,22 @@ public sealed record ExtractionReport(NameSources Sources, ExtractionStats Stats
                 paramInit = Sources.ParamInitCount,
                 paramInitUnknown = Sources.ParamInitUnknownCount,
             },
+            layoutCheck = new
+            {
+                ran = LayoutCheck.Ran,
+                compared = LayoutCheck.Checks.Count(c => c.IsComparable),
+                agree = LayoutCheck.Agreements,
+                disagreements = LayoutCheck.Disagreements.Select(c => new
+                {
+                    className = c.ClassName,
+                    method = c.Method,
+                    instruction = c.Instruction,
+                    member = c.Member,
+                    layoutOffset = $"0x{c.LayoutOffset:X}",
+                    body = c.BodyLocation,
+                }),
+                withheld = LayoutCheck.Withheld.Select(c => new { className = c.ClassName, from = $"0x{c.FirstOffset:X}", reason = c.Reason }),
+            },
             summary = new
             {
                 unknownMembers = Members.Count,
@@ -190,6 +224,7 @@ public sealed record ExtractionReport(NameSources Sources, ExtractionStats Stats
                 Stats.BodiesTooLong,
                 Stats.BodiesWithoutLayout,
                 Stats.BodyReferencesNotFound,
+                Stats.UnknownWithoutOffset,
             },
             members = Members.Where(m => m.Candidates.Count > 0).Select(m => new
             {

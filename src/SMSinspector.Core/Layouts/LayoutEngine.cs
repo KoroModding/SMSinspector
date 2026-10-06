@@ -37,8 +37,37 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
 
     private readonly Dictionary<(string Key, VersionMask Version), ClassLayout?> _cache = [];
     private readonly HashSet<(string Key, VersionMask Version)> _inProgress = [];
+    private readonly Dictionary<string, PalContradiction> _palContradictions = new(StringComparer.Ordinal);
 
     public TypeCatalog Catalog => catalog;
+
+    /// <summary>Evidence from outside the headers that a class's PAL layout is wrong from some offset on.</summary>
+    public IReadOnlyCollection<PalContradiction> PalContradictions => _palContradictions.Values;
+
+    /// <summary>
+    /// Replaces the PAL contradictions. Each one withholds the PAL offsets of its class from
+    /// <see cref="PalContradiction.FirstOffset"/> on, with its reason; the layouts concerned
+    /// are computed again on the next request.
+    /// </summary>
+    public void SetPalContradictions(IEnumerable<PalContradiction> contradictions)
+    {
+        foreach (var name in _palContradictions.Keys)
+        {
+            _cache.Remove((name, VersionMask.Pal));
+        }
+
+        _palContradictions.Clear();
+        foreach (var contradiction in contradictions)
+        {
+            // Several contradictions in one class: the earliest offset wins.
+            if (!_palContradictions.TryGetValue(contradiction.ClassName, out var known) || contradiction.FirstOffset < known.FirstOffset)
+            {
+                _palContradictions[contradiction.ClassName] = contradiction;
+            }
+
+            _cache.Remove((contradiction.ClassName, VersionMask.Pal));
+        }
+    }
 
     /// <summary>Layout of a non-template class by qualified name, or null if unknown or absent from this version.</summary>
     public ClassLayout? GetLayout(string qualifiedName, VersionMask version)
@@ -99,6 +128,11 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
                 layout = Walk(decl, version, bindings, name, null);
             }
 
+            if (version == VersionMask.Pal && _palContradictions.TryGetValue(name, out var contradiction))
+            {
+                ApplyContradiction(layout, contradiction);
+            }
+
             _cache[key] = layout;
             return layout;
         }
@@ -106,6 +140,32 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
         {
             _inProgress.Remove(key);
         }
+    }
+
+    private static void ApplyContradiction(ClassLayout layout, PalContradiction contradiction)
+    {
+        var first = layout.Fields.FirstOrDefault(f => f.Offset >= contradiction.FirstOffset);
+        var lastTrusted = layout.Fields.Where(f => f.Offset < contradiction.FirstOffset).Max(f => f.Offset) ?? layout.BasesEnd ?? 0;
+        var reason = contradiction.Reason;
+
+        for (var i = 0; i < layout.Fields.Count; i++)
+        {
+            if (layout.Fields[i].Offset >= contradiction.FirstOffset)
+            {
+                layout.Fields[i] = layout.Fields[i] with { Offset = null, Source = OffsetSource.Unknown, CommentVerified = false };
+            }
+        }
+
+        // An earlier withholding by the engine stays; the new evidence is still recorded.
+        if (layout.PalUnverifiedAfter is null || lastTrusted < layout.PalUnverifiedAfter)
+        {
+            layout.PalUnverifiedAfter = lastTrusted;
+            layout.PalUnverifiedReason = reason;
+        }
+
+        layout.Size = null;
+        layout.NonVirtualSize = null;
+        layout.Issues.Add(new LayoutIssue(IssueKind.PalUnverified, first?.Name ?? "", $"PAL offsets unverified after 0x{lastTrusted:X}: {reason}"));
     }
 
     private static ClassLayout CopyForPal(ClassLayout jp)
@@ -550,6 +610,7 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
             {
                 withheld = true;
                 layout.PalUnverifiedAfter = lastTrusted;
+                layout.PalUnverifiedReason = $"{member.Name} cannot be placed safely.";
                 layout.Issues.Add(new LayoutIssue(IssueKind.PalUnverified, member.Name,
                     $"PAL offsets unverified after 0x{lastTrusted:X}: {member.Name} cannot be placed safely."));
             }

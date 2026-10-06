@@ -44,7 +44,9 @@ public static class LayoutText
 
         if (layout.PalUnverifiedAfter is { } after)
         {
-            text.AppendLine($"PAL offsets unverified after 0x{after:X}.");
+            text.AppendLine(layout.PalUnverifiedReason is { } reason
+                ? $"PAL offsets unverified after 0x{after:X}: {reason}"
+                : $"PAL offsets unverified after 0x{after:X}.");
         }
 
         foreach (var issue in layout.Issues.Where(i => i.Kind is not IssueKind.PalUnverified))

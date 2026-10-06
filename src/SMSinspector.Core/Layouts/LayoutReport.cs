@@ -29,6 +29,9 @@ public sealed class LayoutReport
 
     public required IReadOnlyList<(string File, string Problem)> ParseProblems { get; init; }
 
+    /// <summary>PAL layouts contradicted by evidence from outside the headers, such as the game's code.</summary>
+    public IReadOnlyList<PalContradiction> PalContradictions { get; init; } = [];
+
     public double JpMatchRate => JpCommentsChecked == 0 ? 1 : (double)JpCommentsMatched / JpCommentsChecked;
 
     public static LayoutReport Build(TypeCatalog catalog, LayoutEngine engine)
@@ -84,6 +87,7 @@ public sealed class LayoutReport
             JpLayoutsWithIssues = withIssues.OrderBy(l => l.Decl.File, StringComparer.Ordinal).ThenBy(l => l.Decl.Line).ToList(),
             PalAffected = affected.OrderBy(a => a.Item2.Decl.File, StringComparer.Ordinal).ThenBy(a => a.Item2.Decl.Line).ToList(),
             ParseProblems = catalog.Headers.SelectMany(h => h.Problems.Select(p => (h.Path, p))).ToList(),
+            PalContradictions = engine.PalContradictions.OrderBy(c => c.ClassName, StringComparer.Ordinal).ToList(),
         };
     }
 
@@ -91,12 +95,20 @@ public sealed class LayoutReport
     public string Summary()
     {
         var unverified = PalAffected.Count(a => a.Pal.PalUnverifiedAfter is not null);
-        return string.Join(Environment.NewLine,
+        var lines = new List<string>
+        {
             $"{ClassCount:N0} classes from {HeaderCount:N0} headers, {SizedClassCount:N0} with a known size.",
             $"JP offset comments reproduced: {JpCommentsMatched:N0} of {JpCommentsChecked:N0} checked ({JpMatchRate.ToString("P1", CultureInfo.InvariantCulture)}).",
             $"Classes with remarks: {JpLayoutsWithIssues.Count:N0}.",
             $"Classes whose PAL layout differs: {PalAffected.Count:N0}" + (unverified > 0 ? $", {unverified} with unverified PAL offsets." : "."),
-            $"Unreadable statements: {ParseProblems.Count:N0}.");
+            $"Unreadable statements: {ParseProblems.Count:N0}.",
+        };
+        if (PalContradictions.Count > 0)
+        {
+            lines.Add($"PAL layouts contradicted by main.dol: {string.Join(", ", PalContradictions.Select(c => c.ClassName))}.");
+        }
+
+        return string.Join(Environment.NewLine, lines);
     }
 
     public string ToText(string? decompCommit = null)
@@ -110,6 +122,17 @@ public sealed class LayoutReport
 
         text.AppendLine();
         text.AppendLine(Summary());
+
+        if (PalContradictions.Count > 0)
+        {
+            text.AppendLine();
+            text.AppendLine("== PAL layouts contradicted by main.dol");
+            text.AppendLine("Game code reads or writes a member at another offset than the layout gives; PAL offsets are withheld from there on.");
+            foreach (var contradiction in PalContradictions)
+            {
+                text.AppendLine($"  {contradiction.ClassName} from 0x{contradiction.FirstOffset:X}: {contradiction.Reason}");
+            }
+        }
 
         text.AppendLine();
         text.AppendLine("== PAL differences");
