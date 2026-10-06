@@ -29,6 +29,8 @@ public partial class MainWindow : Window
 
     private async void OnScanVtables(object? sender, RoutedEventArgs e) => await _viewModel.ScanVtablesAsync();
 
+    private async void OnWalkSceneGraph(object? sender, RoutedEventArgs e) => await _viewModel.WalkSceneGraphAsync();
+
     private void OnClassQueryKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter)

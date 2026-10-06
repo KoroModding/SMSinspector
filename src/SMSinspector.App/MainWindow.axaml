@@ -73,7 +73,10 @@
       <StackPanel Spacing="8" IsVisible="{Binding ShowMario}">
         <TextBlock Classes="heading" Text="Discovery" Margin="0,8,0,0" />
         <TextBlock Text="Polymorphic objects found in MEM1 by their vtable pointer. Freed objects can still show up here; the scene graph will tell them apart." Opacity="0.7" TextWrapping="Wrap" />
-        <Button Content="Scan vtables" Click="OnScanVtables" IsEnabled="{Binding CanScan}" />
+        <StackPanel Orientation="Horizontal" Spacing="12">
+          <Button Content="Scan vtables" Click="OnScanVtables" IsEnabled="{Binding CanScan}" />
+          <Button Content="Walk scene graph" Click="OnWalkSceneGraph" IsEnabled="{Binding CanScan}" />
+        </StackPanel>
         <SelectableTextBlock Classes="mono" Text="{Binding ScanStatus}" TextWrapping="Wrap"
                              IsVisible="{Binding ScanStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
       </StackPanel>

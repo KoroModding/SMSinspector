@@ -7,6 +7,12 @@ public enum AnchorKind
 
     /// <summary>A class member, looked up in the headers: "Class::member".</summary>
     Member,
+
+    /// <summary>A class, looked up in the headers.</summary>
+    Class,
+
+    /// <summary>A class template, matched against the instances in a layout: "Name&lt;...&gt;".</summary>
+    ClassTemplate,
 }
 
 /// <summary>A name some feature starts from. It is a lookup key: its value always comes from the decomp.</summary>
@@ -35,8 +41,26 @@ public static class Anchors
 
     public static readonly Anchor NerveTime = new("TSpineBase<TLiveActor>::mTime", AnchorKind.Member, "nerve panel");
 
+    public static readonly Anchor GraphNode = new("JDrama::TNameRef", AnchorKind.Class, "scene graph walk: graph nodes");
+
+    public static readonly Anchor ListContainer = new("JGadget::TList_pointer", AnchorKind.ClassTemplate, "scene graph walk: list containers");
+
+    public static readonly Anchor ListSize = new("JGadget::TList::mSize", AnchorKind.Member, "scene graph walk: list containers");
+
+    public static readonly Anchor ListSentinel = new("JGadget::TList::oEnd_", AnchorKind.Member, "scene graph walk: list containers");
+
+    public static readonly Anchor ListNodeNext = new("JGadget::TList::TNode_::pNext_", AnchorKind.Member, "scene graph walk: list containers");
+
     public static IReadOnlyList<Anchor> All { get; } =
     [
         MarioPointer, SceneGraphInstance, SceneGraphRoot, InstanceName, Spine, CurrentNerve, PreviousNerve, NerveTime,
+        GraphNode, ListContainer, ListSize, ListSentinel, ListNodeNext,
     ];
+
+    /// <summary>"JGadget::TList::oEnd_" gives ("JGadget::TList", "oEnd_").</summary>
+    public static (string Owner, string Member) Split(Anchor anchor)
+    {
+        var cut = anchor.Name.LastIndexOf("::", StringComparison.Ordinal);
+        return cut < 0 ? ("", anchor.Name) : (anchor.Name[..cut], anchor.Name[(cut + 2)..]);
+    }
 }

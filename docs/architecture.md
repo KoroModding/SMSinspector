@@ -2,7 +2,7 @@
 
 SMSinspector has two projects. `SMSinspector.Core` holds everything that does not draw pixels: memory access, symbols, layouts, the name extractor, and later object discovery. `SMSinspector.App` is the Avalonia front end. Tests cover Core only, against fakes, so they run anywhere without Dolphin or the game.
 
-This page grows with each milestone. Right now it covers memory access, symbols, class layouts, the name extractor, where names come from, and the first pass of object discovery.
+This page grows with each milestone. Right now it covers memory access, symbols, class layouts, the name extractor, where names come from, and object discovery.
 
 ## Memory access
 
@@ -194,6 +194,19 @@ Two kinds of words are counted but not used: pointers into the middle of a vtabl
 Each class name carries its `__vt__` symbol as provenance (kind "symbol": the file, the mangled name and the address).
 
 The scan cannot tell a live object from a freed one: freed heap memory keeps its old vtable pointers until something overwrites it. In a test in Delfino Plaza it found two `TMario` objects, one of them left over from an earlier scene. The scene graph walk, the next pass, separates what the game still uses from what it does not.
+
+### Scene graph walk
+
+`SceneGraphWalker` starts from two anchors: the symbol `instance__Q26JDrama11TNameRefGen` holds the name generator, and its `mRootNameRef` points at the root of the graph. From there it follows two kinds of edges, breadth first, so every object keeps the shortest path to it as its parent.
+
+- **Lists.** A class with `JGadget::TList_pointer<T*>` among its bases holds children in a doubly linked list. The walk finds that base in the layout, then the `JGadget::TList` inside it: `mSize`, and the sentinel node `oEnd_`. It starts at `oEnd_.pNext_` and follows `pNext_` until it is back at the sentinel. The value sits right after each node, so its offset is the size of `TNode_`. A list whose length differs from `mSize`, or that leaves MEM1, stops there and is counted.
+- **Member pointers.** A data member whose declared type is a pointer, or a fixed array of pointers, to a class derived from `JDrama::TNameRef` is followed. The type comes from the header (`LayoutEngine.GetMemberTypeLayout` resolves it from the declaring class, so nested types work), not from the member's name, which may still be `unkXX`. The edge records the member with its header line.
+
+Before following any pointer, the walk checks it: inside MEM1, aligned on 4, a word at the declared type's vptr offset that is exactly a `__vt__` symbol's address, and a class equal to the declared type or derived from it. A pointer that fails is not followed; it is counted by reason, with a few samples that show the declared and the found class. Objects already visited are skipped, so cycles end. A depth limit and a time budget stop runaway walks; the result then says what cut it and how many objects were reached. Members of type `T**` and array containers are counted and not followed.
+
+`DiscoveryMerge` puts the scan next to the walk. Scanned objects of graph classes that the walk did not reach are listed as "not reached (possibly stale)"; scanned objects of other classes are outside the graph by nature. Instance names (`mName`) are Shift-JIS strings read from memory, with the address they were read at as provenance.
+
+In Delfino Plaza (PAL) the walk reaches about 1,070 objects in under 30 ms. The live `TMario` is among them, under the strategy's groups; the freed one the scan also finds is not. The class check rejects a few dozen list elements whose class does not derive from the list's declared element type, for example `TMap` and `TSky` in groups declared to hold `THitActor`.
 
 ## Where names come from
 

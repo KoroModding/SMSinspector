@@ -83,6 +83,8 @@ Once Dolphin runs the game and the decomp is loaded, the **Discovery** section h
 
 The scan also finds objects the game has freed but not yet overwritten, so counts can include leftovers from an earlier scene. Scan in a level, not on the title screen, and scan again after a scene change.
 
+**Walk scene graph** follows the game's own object tree from its root, through lists and member pointers, and prints the first levels with each object's class and instance name (in Japanese, as the game stores it). It then compares with a scan: objects of graph classes that the walk did not reach are listed as "not reached (possibly stale)". The summary also counts the pointers it refused to follow and why, and says whether the object `gpMarioAddress` points to is in the graph.
+
 ### Checking the layouts against main.dol
 
 With a verified `main.dol`, SMSinspector also checks the PAL layouts against the game's code. It takes every original accessor that is two instructions in `main.dol` and whose decomp body returns or assigns a single member, and compares the offset the code uses with the offset the layout gives that member. On the current decomp almost all of them agree.

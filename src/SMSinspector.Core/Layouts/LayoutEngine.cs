@@ -78,6 +78,17 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
 
     public ClassLayout? GetLayout(ClassDecl decl, VersionMask version) => GetLayout(decl, version, Bindings.Empty);
 
+    /// <summary>
+    /// Layout of the class a member is declared with, looked up from the class that declares
+    /// it, so nested types resolve ("TNode_" inside a list). Pointers and arrays are stripped:
+    /// for <c>TFoo* mFoo[4]</c> this is TFoo. Null for a type that is not a class or depends on
+    /// a template parameter.
+    /// </summary>
+    public ClassLayout? GetMemberTypeLayout(ClassLayout owner, FieldLayout field, VersionMask version) =>
+        field.Member is { } member && !member.Type.IsFunctionPointer
+            ? ResolveClassLayout(member.Type with { PointerDepth = 0, IsReference = false, ArrayDims = null, IsConst = false }, owner.Decl.QualifiedName, Bindings.Empty, version)
+            : null;
+
     /// <summary>Layout of a class type, template instances included: "TBox&lt;float&gt;" and "TBox&lt;f32&gt;" give the same one.</summary>
     public ClassLayout? GetLayout(TypeSpec type, VersionMask version) =>
         type.IsPointerLike || type.Dims.Count > 0 ? null : ResolveClassLayout(type, "", Bindings.Empty, version);

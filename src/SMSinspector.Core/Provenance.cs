@@ -19,6 +19,9 @@ public enum ProvenanceKind
 
     /// <summary>A symbol of symbols.txt: the file, the mangled name and its address.</summary>
     Symbol,
+
+    /// <summary>Read from the running game's memory: the address it was read at.</summary>
+    Memory,
 }
 
 /// <summary>
@@ -64,6 +67,10 @@ public sealed record Provenance
     /// <summary>A name read from a symbol, for example a class from its <c>__vt__</c> symbol.</summary>
     public static Provenance Symbol(string file, string mangledName, uint address) =>
         new(ProvenanceKind.Symbol, Required(file), null, address, Required(mangledName));
+
+    /// <summary>A name the game itself holds, such as an object's instance name, read at <paramref name="address"/>.</summary>
+    public static Provenance Memory(uint address, string detail) =>
+        new(ProvenanceKind.Memory, "MEM1", null, address, Required(detail));
 
     /// <summary>A name borrowed from a sibling's member: that member's header line.</summary>
     public static Provenance Sibling(Provenance member, string detail) =>

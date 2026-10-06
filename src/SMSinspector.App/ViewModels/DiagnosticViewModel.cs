@@ -192,10 +192,10 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // The layout engine is not thread-safe and the extractor is using it.
-        if (IsExtracting)
+        // The layout engine is not thread-safe, and the extractor and the walk use it.
+        if (IsExtracting || IsScanning)
         {
-            ClassLayoutText = "The name extractor is running; try again when it is done.";
+            ClassLayoutText = "The name extractor or the scene graph walk is running; try again when it is done.";
             return;
         }
 
@@ -234,7 +234,7 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
     /// </summary>
     public async Task RunNameExtractorAsync()
     {
-        if (_layouts is not { } layouts || _decomp is not { } decomp || IsExtracting)
+        if (_layouts is not { } layouts || _decomp is not { } decomp || IsExtracting || IsScanning)
         {
             return;
         }
@@ -336,6 +336,56 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
                     ? $"{Anchors.MarioPointer.Name}: {probe.Message}"
                     : $"{Anchors.MarioPointer.Name} -> 0x{probe.Pointer:X8}: " + (found is null ? "not found by the scan." : $"found by the scan as {found.ClassName.Value}.");
                 return VtableScanText.Describe(result) + Environment.NewLine + check;
+            });
+        }
+        finally
+        {
+            IsScanning = false;
+            _polling = false;
+        }
+    }
+
+    /// <summary>
+    /// Scans MEM1, walks the scene graph from the anchors and compares the two (plan 5.4).
+    /// The walk uses the layout engine, so nothing else touches it meanwhile. Read-only.
+    /// </summary>
+    public async Task WalkSceneGraphAsync()
+    {
+        if (_connection is null || _layouts is not { } layouts || _decomp is not { } decomp || IsScanning || IsExtracting)
+        {
+            return;
+        }
+
+        while (_polling)
+        {
+            await Task.Delay(20);
+        }
+
+        _polling = true;
+        IsScanning = true;
+        ScanStatus = "Walking the scene graph...";
+        try
+        {
+            ScanStatus = await Task.Run(() =>
+            {
+                if (_connection.Memory is not { } memory)
+                {
+                    return "Not connected to the game.";
+                }
+
+                var symbolsFile = Path.GetRelativePath(decomp.Repository.Root, decomp.Repository.SymbolsPath(decomp.Version)).Replace('\\', '/');
+                var walker = new SceneGraphWalker(memory, decomp.Vtables, decomp.Symbols, layouts, symbolsFile);
+                var graph = walker.Walk();
+                var scan = VtableScanner.Scan(memory, decomp.Vtables, decomp.Symbols,
+                    name => layouts.Find(name, VersionMask.Pal) is { HasVptr: true } layout ? layout.VptrOffset : null, symbolsFile);
+                var merge = DiscoveryMerge.Build(graph, scan, walker.IsGraphNodeClass);
+
+                var probe = GlobalObjectProbe.Probe(memory, decomp.Symbols, decomp.Vtables, Anchors.MarioPointer.Name);
+                var node = graph.Nodes.FirstOrDefault(n => n.Address == probe.Pointer);
+                var check = $"{Anchors.MarioPointer.Name} -> 0x{probe.Pointer:X8}: " + (node is null
+                    ? "not in the scene graph."
+                    : $"in the scene graph at depth {node.Depth}, {node.ClassName.Value}" + (node.InstanceName is { } name ? $" \"{name.Value}\"." : "."));
+                return SceneGraphText.Describe(graph, merge) + Environment.NewLine + check;
             });
         }
         finally
