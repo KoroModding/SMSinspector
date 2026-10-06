@@ -2,6 +2,7 @@ using System.Text;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using SMSinspector.App.Settings;
+using SMSinspector.Core;
 using SMSinspector.Core.Layouts;
 using SMSinspector.Core.Memory;
 using SMSinspector.Core.Memory.Windows;
@@ -17,7 +18,6 @@ namespace SMSinspector.App.ViewModels;
 /// </summary>
 public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
 {
-    private const string MarioGlobal = "gpMarioAddress";
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
     private readonly DolphinConnection? _connection;
@@ -32,6 +32,7 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
     private string _status = "Looking for Dolphin...";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowMario))]
     private bool _isConnected;
 
     [ObservableProperty]
@@ -43,10 +44,13 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _decompPath = "No decomp folder chosen.";
 
+    // Without a decomp nothing of the game is named, the anchors included (plan 5.8).
     [ObservableProperty]
-    private string _decompStatus = "";
+    private string _decompStatus = "decomp folder required";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowMario))]
+    [NotifyPropertyChangedFor(nameof(MarioCaption))]
     private bool _isDecompLoaded;
 
     [ObservableProperty]
@@ -59,7 +63,7 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
     private bool _areLayoutsLoaded;
 
     [ObservableProperty]
-    private string _classQuery = "TMario";
+    private string _classQuery = "";
 
     [ObservableProperty]
     private string _classLayoutText = "";
@@ -78,6 +82,11 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private string _namesReportPath = "";
+
+    /// <summary>The Mario probe names an anchor, so it only shows once the decomp is loaded.</summary>
+    public bool ShowMario => IsConnected && IsDecompLoaded;
+
+    public string MarioCaption => IsDecompLoaded ? $"{Anchors.MarioPointer.Name}, followed live to the object and its vtable" : "";
 
     public DiagnosticViewModel()
     {
@@ -179,7 +188,7 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
 
         var layout = _layouts.Find(ClassQuery, VersionMask.Pal);
         ClassLayoutText = layout is null
-            ? $"No class named '{ClassQuery.Trim()}' (templates need their arguments, for example TVec3<f32>)."
+            ? $"No class named '{ClassQuery.Trim()}' (templates need their arguments, as in Name<f32>)."
             : LayoutText.Describe(layout);
     }
 
@@ -222,9 +231,17 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
         NamesReportPath = "";
         try
         {
-            _names = await Task.Run(() => NameExtractor.Run(layouts.Engine, NameSourceLoader.Load(decomp)));
+            // The extractor runs the main.dol check again, so the layout report is rebuilt with it.
+            var (names, report) = await Task.Run(() =>
+            {
+                var result = NameExtractor.Run(layouts.Engine, NameSourceLoader.Load(decomp));
+                return (result, LayoutReport.Build(layouts.Catalog, layouts.Engine));
+            });
+            _names = names;
+            _layouts = layouts with { Report = report };
+            LayoutStatus = report.Summary() + Environment.NewLine + names.LayoutCheck.Summary();
             HasNames = true;
-            NamesStatus = _names.Summary();
+            NamesStatus = names.Summary();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -271,9 +288,22 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
         LayoutStatus = "Parsing headers...";
         try
         {
-            _layouts = await Task.Run(() => LoadedLayouts.Load(repository));
+            var decomp = _decomp;
+            var (layouts, check) = await Task.Run(() =>
+            {
+                var loaded = LoadedLayouts.Load(repository);
+                if (decomp is null)
+                {
+                    return (loaded, LayoutCheckResult.NotRun);
+                }
+
+                // The game's code can contradict a PAL layout; check before anything is shown.
+                var result = DolLayoutCheck.Apply(loaded.Engine, NameSourceLoader.Load(decomp));
+                return (loaded with { Report = LayoutReport.Build(loaded.Catalog, loaded.Engine) }, result);
+            });
+            _layouts = layouts;
             AreLayoutsLoaded = true;
-            LayoutStatus = _layouts.Report.Summary();
+            LayoutStatus = layouts.Report.Summary() + Environment.NewLine + check.Summary();
             ShowClass();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -303,7 +333,7 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
                     s,
                     DescribeConnection(s),
                     memory is null ? "" : DumpHeader(memory),
-                    memory is null ? "" : decomp is null ? "Choose the decomp folder to resolve symbols." : DescribeMario(memory, decomp));
+                    memory is null || decomp is null ? "" : DescribeMario(memory, decomp));
             });
 
             Status = status.Describe();
@@ -348,12 +378,13 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
 
     private static string DescribeMario(IGameMemory memory, LoadedDecomp decomp)
     {
-        var result = GlobalObjectProbe.Probe(memory, decomp.Symbols, decomp.Vtables, MarioGlobal);
+        var anchor = Anchors.MarioPointer.Name;
+        var result = GlobalObjectProbe.Probe(memory, decomp.Symbols, decomp.Vtables, anchor);
         var text = new StringBuilder();
 
         if (result.Global is { } global)
         {
-            text.AppendLine($"{MarioGlobal,-16} {global.Section} 0x{global.Address:X8} = 0x{result.Pointer:X8}");
+            text.AppendLine($"{anchor,-16} {global.Section} 0x{global.Address:X8} = 0x{result.Pointer:X8}");
         }
 
         if (result.Identity is { } identity)

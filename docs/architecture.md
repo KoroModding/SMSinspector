@@ -2,7 +2,7 @@
 
 SMSinspector has two projects. `SMSinspector.Core` holds everything that does not draw pixels: memory access, symbols, layouts, the name extractor, and later object discovery. `SMSinspector.App` is the Avalonia front end. Tests cover Core only, against fakes, so they run anywhere without Dolphin or the game.
 
-This page grows with each milestone. Right now it covers memory access, symbols, class layouts and the name extractor.
+This page grows with each milestone. Right now it covers memory access, symbols, class layouts, the name extractor and where names come from.
 
 ## Memory access
 
@@ -169,6 +169,22 @@ The offset is matched against the flattened PAL layout of the method's class (ba
 
 For each `unkXX` member a class declares, the extractor looks at the other classes with the same first base. If one of them declares a named member at the same offset with the same size, that name is a hint. Subclasses of a common base often put unrelated members at the same offset, so this level ranks last.
 
+### main.dol against the layouts
+
+`DolLayoutCheck` reuses both sources to check the layouts themselves. For each original accessor that decodes to the strict shape and whose decomp body names a single member (`BodyAnalyzer.SingleMember`, any member name), it compares the decoded offset with where the PAL layout of the accessor's class puts that member. Agreement confirms the layout at that point.
+
+A disagreement becomes a `PalContradiction` for the class that declares the member, starting at the smaller of the two offsets. `LayoutEngine.SetPalContradictions` stores them and drops the cached PAL layouts concerned. The next time one is computed, its fields from that offset on lose their offset, its size becomes unknown, and `PalUnverifiedAfter` and `PalUnverifiedReason` say from where and why, as for a class the engine cannot place on its own. JP layouts are not touched. Several contradictions in one class keep the earliest.
+
+The app runs the check right after loading the layouts, and the extractor runs it again before collecting candidates, so no candidate lands on a withheld offset. Withheld `unkXX` members are counted in the report instead.
+
 ### Report
 
 `NameExtractor` collects the candidates per member and orders them by level. `ExtractionReport` writes them as text and JSON with the source of every candidate (mangled name and size, decoded instruction or body with its file and line) and a section that counts what was read but not interpreted. The app saves it to `%APPDATA%\SMSinspector\reports\`. Like the layout report, it is never committed.
+
+## Where names come from
+
+Every class, field and symbol name SMSinspector shows comes from the user's decomp clone, read at startup. Without a clone, the window says "decomp folder required" and shows no name from the game.
+
+The code holds no game name, with one exception: `Anchors.cs`. Some features have to start from a known place (the diagnostics follow `gpMarioAddress`; object discovery will start from the scene graph root; the nerve panel will read the spine fields), and those names are anchors. An anchor is only a lookup key. The file holds the name, its kind (symbol or member) and the feature that uses it, never an address, an offset or a type: those are resolved in `symbols.txt` and the headers. If an anchor does not resolve, the feature that needs it is turned off and says which anchor failed.
+
+`SourceGuardTests` enforces this. It reads every string literal under `src/` (regular, verbatim, interpolated and raw strings) and the text attributes of the XAML files, and fails on any identifier shaped like a decomp name (`TFoo`, `gpFoo`, `mFoo`, a mangled name with a `Q` scope) outside `Anchors.cs`. Comments are not checked: they may cite decomp names as examples.

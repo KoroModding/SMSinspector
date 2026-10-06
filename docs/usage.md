@@ -13,6 +13,8 @@
 git clone https://github.com/doldecomp/sms.git
 ```
 
+Until a decomp folder is set, the **Decomp** section says "decomp folder required" and SMSinspector shows no name from the game at all: every class, field and symbol name comes from the clone.
+
 In SMSinspector, click **Choose decomp folder...** and pick the root of the clone: the folder that contains `configure.py` and `config/GMSP01/`. SMSinspector checks both, loads `config/GMSP01/symbols.txt`, and shows the clone's commit and how many symbols and vtables it read.
 
 The path is saved in `%APPDATA%\SMSinspector\settings.json`, so you only pick it once. If you pull new commits into the clone, restart SMSinspector to reload the symbols.
@@ -44,7 +46,7 @@ Type a class name (`TMario`, `JDrama::TNameRef`, or `TVec3<f32>` for a template)
 - **PAL only**: the member exists only in the PAL build.
 - **(padding)**: bytes an alignment explains. **(gap)**: bytes nothing in the header explains.
 
-When PAL offsets cannot be derived safely, the layout ends with "PAL offsets unverified after 0x.." and the later offsets show as `?`.
+When PAL offsets cannot be derived safely, the layout ends with "PAL offsets unverified after 0x.." and the later offsets show as `?`. The same happens when the game's own code contradicts the layout (see "Checking the layouts against main.dol" below); the line then says why.
 
 **Save full report** writes the complete validation report, with every disagreement between the headers and the computation, to `%APPDATA%\SMSinspector\reports\layout-report-<commit>.txt`. It can be useful to the decomp project as it is.
 
@@ -74,6 +76,14 @@ The dol accessor level needs the game's executable, from your own disc. The deco
 Before using it, SMSinspector compares the file's SHA-1 with the one the decomp lists in `config/GMSP01/build.sha1`. If they differ (another revision, a modded executable), the extractor does not use the file and the summary says so. The file stays where you put it; SMSinspector never copies it.
 
 Run the extractor again after adding the file: it reads its sources on every run.
+
+### Checking the layouts against main.dol
+
+With a verified `main.dol`, SMSinspector also checks the PAL layouts against the game's code. It takes every original accessor that is two instructions in `main.dol` and whose decomp body returns or assigns a single member, and compares the offset the code uses with the offset the layout gives that member. On the current decomp almost all of them agree.
+
+When they disagree, the header or the layout is wrong for PAL there. The class then shows "PAL offsets unverified after 0x..", with the method, the decoded instruction and the decomp line as the reason, and its later offsets show as `?`. The **Layouts** summary names those classes and the name report lists each disagreement. SMSinspector does not decide which side is right.
+
+The check runs when the layouts load and again on each **Run name extractor**, so a `main.dol` added later is picked up by running the extractor.
 
 ### Optional: the original linker map
 
