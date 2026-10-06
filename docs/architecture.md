@@ -214,6 +214,29 @@ Before following any pointer, the walk checks it: inside MEM1, aligned on 4, a w
 
 In Delfino Plaza (PAL) the walk reaches about 1,070 objects in under 30 ms. The live `TMario` is among them, under the strategy's groups; the freed one the scan also finds is not. About 27 edges are type mismatches: the strategy's groups are declared to hold `THitActor`, yet they also hold `TMap`, `TSky` and the cube managers, and a list declared for `TViewObj` holds a plain name list. Either the declared types are too narrow or the game casts; the walk follows them and says so.
 
+## Field values
+
+`ObjectFields` turns a PAL layout into the rows of a field grid, once per class. Bases come first, then the class's own members, in memory order. A member whose type is a class stored inline (a vector, a block of parameters) gets its members as child rows, and an array gets one child row per element; both are built only when asked for. Bytes no member covers, padding included, become gap rows of at most 16 bytes, shown raw. Members whose PAL offset is withheld come last, with the reason, and are never read.
+
+To decode a member, the layout engine resolves its type down to what the bytes hold (`DataType`): an integer, float or bool of some size, a pointer, an enum, an inline class, an array, or raw bytes when the type does not resolve. It follows typedefs, template parameters and enums. A plain `char` is signed, since the game is built with `-char signed`.
+
+One object costs one memory read: `ReadSize` bytes from its address, which is the class size when it is known. `FieldDecoder` then decodes every row from that buffer, big-endian.
+
+### Plausibility check
+
+Every decoded value goes through the rules in `Plausibility`. A value that fails one carries a flag naming the rule and its threshold, for the tooltip.
+
+| Rule | Fires on | Severity |
+|---|---|---|
+| pointer range | a non-null pointer outside `0x80000000..0x81800000`; below `0x01800000` the message adds that it is probably a physical address, the kind the graphics hardware takes | warning |
+| f32 NaN, infinite, denormal, too large | an `f32` that is NaN, infinite, denormal, or above `1e7` in absolute value | warning |
+| bool range | a `bool` other than 0 or 1 | warning |
+| unsigned top bit | an unsigned 16- or 32-bit member named like a counter, an index or a size (`Num`, `Count`, `Cnt`, `Index`, `Idx`, `Size`, `Len`) with its top bit set | suspect |
+
+A null pointer is never flagged. The pointer range and the float limit are settings.
+
+The top-bit rule looks at names because of a measurement. In Bianco Hills (episode 8, PAL), applied to every named unsigned member, it raised 1,383 suspects over 1,358 objects, nearly all of them on name hashes (`mKeyCode`) and flag words (`mHitFlags`). With the name filter it raised none there. A suspect is weaker than a warning anyway: it says "look here", nothing more.
+
 ## Where names come from
 
 Every class, field and symbol name SMSinspector shows comes from the user's decomp clone, read at startup. Without a clone, the window says "decomp folder required" and shows no name from the game.

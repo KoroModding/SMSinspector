@@ -223,6 +223,8 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
             BasesEnd = jp.BasesEnd,
             CommentsChecked = jp.CommentsChecked,
             CommentsMatched = jp.CommentsMatched,
+            BoundTypes = jp.BoundTypes,
+            BoundValues = jp.BoundValues,
         };
         copy.Bases.AddRange(jp.Bases);
         copy.VirtualBases.AddRange(jp.VirtualBases);
@@ -272,6 +274,8 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
             Identity = new SourcedName(name, Provenance.Header(decl.File, decl.Line, name == decl.QualifiedName ? "" : $"template instance {name}")),
             Decl = decl,
             Version = version,
+            BoundTypes = bindings.Types,
+            BoundValues = bindings.Values,
         };
         var isPal = version == VersionMask.Pal;
         var isUnion = decl.Kind == ClassKind.Union;

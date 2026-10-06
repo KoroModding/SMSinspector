@@ -125,6 +125,12 @@ public sealed class ClassLayout
     /// <summary>For PAL: a hint that the layout is wrong somewhere, with its reason; offsets are kept.</summary>
     public PalSuspect? PalSuspect { get; set; }
 
+    /// <summary>For a template instance: the types its parameters stand for, to resolve members typed with them.</summary>
+    internal IReadOnlyDictionary<string, TypeSpec> BoundTypes { get; init; } = new Dictionary<string, TypeSpec>();
+
+    /// <summary>For a template instance: the values of its non-type parameters.</summary>
+    internal IReadOnlyDictionary<string, long> BoundValues { get; init; } = new Dictionary<string, long>();
+
     public override string ToString() => $"{Name} ({Version})";
 }
 
