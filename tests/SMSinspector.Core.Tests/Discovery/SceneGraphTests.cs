@@ -60,6 +60,13 @@ public class SceneGraphTests
         class TSubActor : public TActor { };
 
         class TOther : public JDrama::TNameRef { };
+
+        class TActorGroup : public JDrama::TNameRef, public JGadget::TList_pointer<TActor*> { };
+
+        class TPlain {
+        public:
+            virtual void run();
+        };
         """;
 
     [Fact]
@@ -118,14 +125,14 @@ public class SceneGraphTests
         var world = new World();
         var a = world.New("TActor", "a");
         var b = world.New("TActor", "b");
-        var other = world.New("TOther", "other");
+        var plain = world.New("TPlain", null);
         var ghost = world.New("TGhost", "ghost");
         var blank = world.Alloc(0x20);
         world.List(world.Root, a, b);
         world.Set(a, "mPartner", 0x90000000);
         world.Set(a, "mGroups", world.Root + 2, 0);
         world.Set(a, "mGroups", blank, 1);
-        world.Set(b, "mPartner", other);
+        world.Set(b, "mPartner", plain);
         world.List(world.Root, a, b, ghost);
 
         var graph = world.Walk();
@@ -135,12 +142,42 @@ public class SceneGraphTests
         Assert.Equal(1, graph.Rejected[RejectReason.UnknownVtable]);
         Assert.Equal(1, graph.Rejected[RejectReason.WrongClass]);
         Assert.Equal(1, graph.Rejected[RejectReason.ClassWithoutLayout]);
-        Assert.False(graph.Contains(other));
+        Assert.False(graph.Contains(plain));
         Assert.False(graph.Contains(ghost));
 
         var wrong = graph.RejectedSamples.Single(s => s.Reason == RejectReason.WrongClass);
         Assert.Equal("TActor", wrong.Declared);
-        Assert.Equal("TOther", wrong.Actual);
+        Assert.Equal("TPlain", wrong.Actual);
+        Assert.DoesNotContain(graph.Nodes, n => n.IsTypeMismatch);
+    }
+
+    [Fact]
+    public void Graph_nodes_of_another_class_than_declared_are_followed_and_marked()
+    {
+        var world = new World();
+        var group = world.New("TActorGroup", "actors");
+        var actor = world.New("TActor", "actor");
+        var other = world.New("TOther", "other");
+        var partner = world.New("TOther", "partner");
+        world.List(world.Root, group);
+        world.List(group, actor, other);
+        world.Set(actor, "mPartner", partner);
+
+        var graph = world.Walk();
+
+        var listed = graph.Nodes.Single(n => n.Address == other);
+        Assert.True(listed.IsTypeMismatch);
+        Assert.Equal("TActor", listed.MismatchDeclared);
+        Assert.Equal("TOther", listed.ClassName.Value);
+        Assert.Equal(EdgeKind.List, listed.Edge);
+        Assert.Equal(EdgeKind.Member, graph.Nodes.Single(n => n.Address == partner).Edge);
+        Assert.False(graph.Nodes.Single(n => n.Address == actor).IsTypeMismatch);
+        Assert.Equal(2, graph.Nodes.Count(n => n.IsTypeMismatch));
+        Assert.Empty(graph.Rejected);
+
+        var text = SceneGraphText.Describe(graph);
+        Assert.Contains("Followed with a type mismatch (class not derived from the declared type): 2.", text);
+        Assert.Contains("declared TActor, found TOther", text);
     }
 
     [Fact]

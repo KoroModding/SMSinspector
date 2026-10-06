@@ -24,6 +24,10 @@ public enum EdgeKind
 /// <param name="Parent">The object it was first reached from; null for the root.</param>
 /// <param name="Via">For a member edge, the parent's member with its header line; for the root, the anchor member.</param>
 /// <param name="Index">Position in the parent's list, or element of a member array.</param>
+/// <param name="MismatchDeclared">
+/// Set when the edge was a type mismatch: the type the list or member declares, which the
+/// object's class does not derive from. The object still derives from the graph node class.
+/// </param>
 public sealed record GraphNode(
     uint Address,
     SourcedName ClassName,
@@ -32,7 +36,11 @@ public sealed record GraphNode(
     uint? Parent,
     EdgeKind Edge,
     SourcedName? Via,
-    int Index);
+    int Index,
+    string? MismatchDeclared = null)
+{
+    public bool IsTypeMismatch => MismatchDeclared is not null;
+}
 
 public enum RejectReason
 {
@@ -42,7 +50,7 @@ public enum RejectReason
     /// <summary>The word where the vtable pointer should be is not a vtable symbol's address.</summary>
     UnknownVtable,
 
-    /// <summary>The object's class is neither the declared type nor derived from it.</summary>
+    /// <summary>The object's class does not derive from the graph node class at all.</summary>
     WrongClass,
 
     /// <summary>The object's class has no layout, so whether it derives from the declared type is unknown.</summary>
@@ -138,7 +146,7 @@ public sealed class SceneGraphWalker
         var rejected = new Dictionary<RejectReason, int>();
         var samples = new List<RejectedEdge>();
         var visited = new HashSet<uint>();
-        var queue = new Queue<(Candidate Edge, ClassLayout Layout, int Depth)>();
+        var queue = new Queue<(Candidate Edge, ClassLayout Layout, int Depth, bool Mismatch)>();
         int nulls = 0, doublePointers = 0, sizeMismatches = 0;
         var cutByDepth = 0;
         string? truncated = null;
@@ -157,7 +165,7 @@ public sealed class SceneGraphWalker
                 return;
             }
 
-            if (!TryCheck(candidate, out var layout, out var reason, out var actual))
+            if (!TryCheck(candidate, out var layout, out var reason, out var actual, out var mismatch))
             {
                 rejected[reason] = rejected.GetValueOrDefault(reason) + 1;
                 if (samples.Count < MaxSamples)
@@ -169,7 +177,7 @@ public sealed class SceneGraphWalker
             }
 
             visited.Add(candidate.Target);
-            queue.Enqueue((candidate, layout, depth));
+            queue.Enqueue((candidate, layout, depth, mismatch));
         }
 
         Offer(root, 0);
@@ -181,7 +189,7 @@ public sealed class SceneGraphWalker
                 break;
             }
 
-            var (edge, layout, depth) = queue.Dequeue();
+            var (edge, layout, depth, isMismatch) = queue.Dequeue();
             var plan = Plan(layout);
             if (_error is not null)
             {
@@ -189,7 +197,7 @@ public sealed class SceneGraphWalker
             }
 
             nodes.Add(new GraphNode(edge.Target, ClassName(edge.Target, layout), ReadName(edge.Target, plan), depth,
-                edge.Edge == EdgeKind.Root ? null : edge.From, edge.Edge, edge.Via, edge.Index));
+                edge.Edge == EdgeKind.Root ? null : edge.From, edge.Edge, edge.Via, edge.Index, isMismatch ? edge.Declared.Name : null));
 
             if (plan is null)
             {
@@ -283,10 +291,16 @@ public sealed class SceneGraphWalker
         return true;
     }
 
-    private bool TryCheck(Candidate candidate, out ClassLayout layout, out RejectReason reason, out string? actualClass)
+    /// <param name="mismatch">
+    /// True when the class does not derive from the declared type but does derive from the
+    /// graph node class: the edge is followed and marked, since the game stores objects in
+    /// lists and members more loosely than the headers declare.
+    /// </param>
+    private bool TryCheck(Candidate candidate, out ClassLayout layout, out RejectReason reason, out string? actualClass, out bool mismatch)
     {
         layout = null!;
         actualClass = null;
+        mismatch = false;
         var target = candidate.Target;
         if (!GameCube.IsMem1Address(target))
         {
@@ -324,8 +338,13 @@ public sealed class SceneGraphWalker
 
         if (!DerivesFrom(actual, candidate.Declared.Name))
         {
-            reason = RejectReason.WrongClass;
-            return false;
+            if (!DerivesFrom(actual, _nodeLayout.Name))
+            {
+                reason = RejectReason.WrongClass;
+                return false;
+            }
+
+            mismatch = true;
         }
 
         _classNames.TryAdd(target, new SourcedName(vtable.ClassName, Provenance.Symbol(_symbolsFile, vtable.Symbol.Name, vtable.Symbol.Address)));
@@ -587,6 +606,13 @@ public static class SceneGraphText
             ? "none"
             : string.Join(", ", graph.Rejected.OrderByDescending(r => r.Value).Select(r => $"{r.Value:N0} {ReasonText(r.Key)}"));
         lines.Add($"Rejected edges, not followed: {rejected}.");
+        var mismatches = graph.Nodes.Where(n => n.IsTypeMismatch).ToList();
+        lines.Add($"Followed with a type mismatch (class not derived from the declared type): {mismatches.Count:N0}.");
+        foreach (var group in mismatches.GroupBy(n => (n.MismatchDeclared, n.ClassName.Value)).OrderByDescending(g => g.Count()).ThenBy(g => g.Key.Value, StringComparer.Ordinal).Take(topClasses))
+        {
+            lines.Add($"  {group.Count(),6:N0}  declared {group.Key.MismatchDeclared}, found {group.Key.Value}");
+        }
+
         lines.Add($"Not followed: {graph.DoublePointerMembers:N0} T** members. Null pointers: {graph.NullPointers:N0}. Lists whose length disagrees with their size: {graph.ListSizeMismatches:N0}.");
 
         foreach (var sample in graph.RejectedSamples.Take(5))
@@ -633,7 +659,7 @@ public static class SceneGraphText
         RejectReason.OutsideMem1 => "outside MEM1",
         RejectReason.Misaligned => "misaligned",
         RejectReason.UnknownVtable => "no known vtable",
-        RejectReason.WrongClass => "class not derived from the declared type",
+        RejectReason.WrongClass => $"class not derived from {Anchors.GraphNode.Name}",
         RejectReason.ClassWithoutLayout => "class without a layout",
         RejectReason.Unverifiable => "declared type cannot be checked",
         _ => reason.ToString(),
