@@ -47,6 +47,7 @@ public class NameExtractorTests
         ("getWide__9TFooActorCFv", 8, [Lhz(3, 0x10), Blr]),
         ("getAddress__9TFooActorFv", 8, [Addi(3, 3, 0x14), Blr]),
         ("reset__9TFooActorFv", 12, [Blr, Blr, Blr]),
+        ("__ct__9TFooActorFl", 8, [Stw(4, 0x10), Blr]),
     ];
 
     private static ExtractionReport Run(bool withDol = true)
@@ -130,6 +131,14 @@ public class NameExtractorTests
 
         Assert.DoesNotContain(Member(report, "unk10").Candidates, c => c.Source.Contains("getUnk10"));
         Assert.Equal(1, report.Stats.BodiesNotOriginal);
+    }
+
+    [Fact]
+    public void Constructors_are_not_accessors()
+    {
+        var unk10 = Member(Run(), "unk10");
+
+        Assert.DoesNotContain(unk10.Candidates, c => c.Source.Contains("__ct__"));
     }
 
     [Fact]

@@ -163,7 +163,7 @@ The offset is matched against the flattened PAL layout of the method's class (ba
 
 `SourceScanner` reads every header and source file of the clone (`include/`, `src/`, and the same folders under `libs/`) with the header lexer, keeping the tokens of one game version. It tracks namespaces and class bodies by matching braces, and records each member function definition with its class, parameters, constness and body tokens, both inline in a class and as `TClass::name(...) { ... }` outside it. It also records which declarations carry a `// UNUSED` comment, on the line before or at the end of the line.
 
-`BodyAnalyzer` keeps bodies of original methods only. A body that is exactly `return unkXX;` or `unkXX = <parameter>;` (with or without `this->`) gives a "matching" link. A body of at most two statements, without a nested block, that uses `unkXX` some other way gives an "indirect" link. A name read after another object's `.` or `->` belongs to that object and is skipped. Constructors and destructors are skipped too: they set up many members and name none of them.
+`BodyAnalyzer` keeps bodies of original methods only. A body that is exactly `return unkXX;` or `unkXX = <parameter>;` (with or without `this->`) gives a "matching" link. A body of at most two statements, without a nested block, that uses `unkXX` some other way gives an "indirect" link. A name read after another object's `.` or `->` belongs to that object and is skipped. Constructors and destructors are skipped here and in `main.dol`: they set up many members and name none of them.
 
 ### Sibling offsets
 

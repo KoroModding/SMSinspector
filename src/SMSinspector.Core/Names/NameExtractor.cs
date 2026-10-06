@@ -100,7 +100,7 @@ public static partial class NameExtractor
         var image = sources.Executable.Image!;
         foreach (var method in sources.Methods.All)
         {
-            if (method.Address is not { } address || method.Mangled is null)
+            if (method.Address is not { } address || method.Mangled is null || IsConstructorOrDestructor(method.ClassName, method.Name))
             {
                 continue;
             }
@@ -159,9 +159,7 @@ public static partial class NameExtractor
     {
         foreach (var body in sources.Sources.Bodies)
         {
-            // Constructors and destructors set members up; they say nothing about one member's name.
-            var className = body.ClassName[(body.ClassName.LastIndexOf("::", StringComparison.Ordinal) + 1)..].TrimStart(':');
-            if (body.Name == className || body.Name.StartsWith('~'))
+            if (IsConstructorOrDestructor(body.ClassName, body.Name))
             {
                 continue;
             }
@@ -278,6 +276,20 @@ public static partial class NameExtractor
                     $"same base {layout.Bases[0].Layout.Name}, same offset and size: {shown}"));
             }
         }
+    }
+
+    /// <summary>Constructors and destructors set members up; they say nothing about one member's name.</summary>
+    private static bool IsConstructorOrDestructor(string className, string name)
+    {
+        var lastScope = className.LastIndexOf("::", StringComparison.Ordinal);
+        var shortName = lastScope < 0 ? className : className[(lastScope + 2)..];
+        var templateStart = shortName.IndexOf('<');
+        if (templateStart >= 0)
+        {
+            shortName = shortName[..templateStart];
+        }
+
+        return name == shortName || name.StartsWith('~');
     }
 
     internal static string OriginText(NameOrigin origin)
