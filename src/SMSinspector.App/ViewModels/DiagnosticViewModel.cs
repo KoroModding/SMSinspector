@@ -3,6 +3,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using SMSinspector.App.Settings;
 using SMSinspector.Core;
+using SMSinspector.Core.Discovery;
 using SMSinspector.Core.Layouts;
 using SMSinspector.Core.Memory;
 using SMSinspector.Core.Memory.Windows;
@@ -33,7 +34,15 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowMario))]
+    [NotifyPropertyChangedFor(nameof(CanScan))]
     private bool _isConnected;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanScan))]
+    private bool _isScanning;
+
+    [ObservableProperty]
+    private string _scanStatus = "";
 
     [ObservableProperty]
     private string _details = "";
@@ -60,6 +69,7 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
     private string _layoutStatus = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanScan))]
     private bool _areLayoutsLoaded;
 
     [ObservableProperty]
@@ -82,6 +92,9 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private string _namesReportPath = "";
+
+    /// <summary>The scan names classes, so it needs the decomp, and the layouts for the vptr offsets.</summary>
+    public bool CanScan => IsConnected && AreLayoutsLoaded && !IsScanning;
 
     /// <summary>The Mario probe names an anchor, so it only shows once the decomp is loaded.</summary>
     public bool ShowMario => IsConnected && IsDecompLoaded;
@@ -276,6 +289,59 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             NamesReportPath = $"Could not save the report: {e.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Finds every polymorphic object in MEM1 by its vtable pointer (plan 5.4, pass 1), and
+    /// checks the result against the object gpMarioAddress points to. Read-only.
+    /// </summary>
+    public async Task ScanVtablesAsync()
+    {
+        if (_connection is null || _layouts is not { } layouts || _decomp is not { } decomp || IsScanning)
+        {
+            return;
+        }
+
+        // The layout engine is not thread-safe: work out every vptr offset here, before going
+        // to the background.
+        var offsets = decomp.Vtables.All
+            .Select(v => v.ClassName)
+            .Distinct(StringComparer.Ordinal)
+            .ToDictionary(name => name, name => layouts.Find(name, VersionMask.Pal) is { HasVptr: true } layout ? layout.VptrOffset : null, StringComparer.Ordinal);
+
+        // Hold off polling: the connection is not thread-safe either.
+        while (_polling)
+        {
+            await Task.Delay(20);
+        }
+
+        _polling = true;
+        IsScanning = true;
+        ScanStatus = "Scanning MEM1...";
+        try
+        {
+            ScanStatus = await Task.Run(() =>
+            {
+                if (_connection.Memory is not { } memory)
+                {
+                    return "Not connected to the game.";
+                }
+
+                var symbolsFile = Path.GetRelativePath(decomp.Repository.Root, decomp.Repository.SymbolsPath(decomp.Version)).Replace('\\', '/');
+                var result = VtableScanner.Scan(memory, decomp.Vtables, decomp.Symbols, name => offsets.GetValueOrDefault(name), symbolsFile);
+                var probe = GlobalObjectProbe.Probe(memory, decomp.Symbols, decomp.Vtables, Anchors.MarioPointer.Name);
+                var found = result.At(probe.Pointer);
+                var check = probe.Global is null
+                    ? $"{Anchors.MarioPointer.Name}: {probe.Message}"
+                    : $"{Anchors.MarioPointer.Name} -> 0x{probe.Pointer:X8}: " + (found is null ? "not found by the scan." : $"found by the scan as {found.ClassName.Value}.");
+                return VtableScanText.Describe(result) + Environment.NewLine + check;
+            });
+        }
+        finally
+        {
+            IsScanning = false;
+            _polling = false;
         }
     }
 

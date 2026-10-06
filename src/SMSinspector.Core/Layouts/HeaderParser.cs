@@ -880,6 +880,17 @@ public sealed class HeaderParser
     }
 
     /// <summary>
+    /// Reads a whole type written as text, such as a demangled class name
+    /// ("TSpineBase&lt;TLiveActor&gt;", "TParamRT&lt;unsigned char&gt;"). Fails if anything is left over.
+    /// </summary>
+    public static bool TryParseType(string text, out TypeSpec type)
+    {
+        var tokens = HeaderLexer.Tokenize(text).Tokens.Where(t => t.Kind is not (TokenKind.LineComment or TokenKind.OffsetComment)).ToList();
+        var index = 0;
+        return TryParseTypeName(tokens, ref index, out type) && index == tokens.Count && type.Name.Length > 0;
+    }
+
+    /// <summary>
     /// Reads a type name: builtin words ("unsigned char"), or a qualified name with
     /// template arguments, plus const and trailing pointers belonging to the type itself.
     /// </summary>

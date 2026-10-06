@@ -78,6 +78,10 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
 
     public ClassLayout? GetLayout(ClassDecl decl, VersionMask version) => GetLayout(decl, version, Bindings.Empty);
 
+    /// <summary>Layout of a class type, template instances included: "TBox&lt;float&gt;" and "TBox&lt;f32&gt;" give the same one.</summary>
+    public ClassLayout? GetLayout(TypeSpec type, VersionMask version) =>
+        type.IsPointerLike || type.Dims.Count > 0 ? null : ResolveClassLayout(type, "", Bindings.Empty, version);
+
     /// <summary>Size and alignment of a type as written in <paramref name="scope"/>.</summary>
     public bool TrySize(TypeSpec type, string scope, VersionMask version, out uint size, out uint align, out string? problem) =>
         TrySize(type, scope, Bindings.Empty, version, out size, out align, out problem);

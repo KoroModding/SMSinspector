@@ -14,7 +14,18 @@ public sealed record LoadedLayouts(TypeCatalog Catalog, LayoutEngine Engine, Lay
         return new LoadedLayouts(catalog, engine, LayoutReport.Build(catalog, engine));
     }
 
-    /// <summary>Finds a class by name as the user types it ("TMario", "JDrama::TNameRef") and lays it out.</summary>
-    public ClassLayout? Find(string name, VersionMask version) =>
-        Catalog.Resolve(name.Trim(), "") is ResolvedName.Class cls ? Engine.GetLayout(cls.QualifiedName, version) : null;
+    /// <summary>
+    /// Finds a class by name and lays it out: as the user types it ("TMario", "JDrama::TNameRef",
+    /// "TBox&lt;f32&gt;") or as the demangler writes it ("TParamRT&lt;unsigned char&gt;").
+    /// </summary>
+    public ClassLayout? Find(string name, VersionMask version)
+    {
+        name = name.Trim();
+        if (!name.Contains('<') && Catalog.Resolve(name, "") is ResolvedName.Class cls)
+        {
+            return Engine.GetLayout(cls.QualifiedName, version);
+        }
+
+        return HeaderParser.TryParseType(name, out var type) ? Engine.GetLayout(type, version) : null;
+    }
 }

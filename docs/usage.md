@@ -77,6 +77,12 @@ Before using it, SMSinspector compares the file's SHA-1 with the one the decomp 
 
 Run the extractor again after adding the file: it reads its sources on every run.
 
+### Discovery
+
+Once Dolphin runs the game and the decomp is loaded, the **Discovery** section has a **Scan vtables** button. It reads MEM1 once and lists how many polymorphic objects it found, of how many classes, how many are static, and the most common classes. The last line follows `gpMarioAddress` and says whether the scan found that object, and as which class: it should say `TMario`.
+
+The scan also finds objects the game has freed but not yet overwritten, so counts can include leftovers from an earlier scene. Scan in a level, not on the title screen, and scan again after a scene change.
+
 ### Checking the layouts against main.dol
 
 With a verified `main.dol`, SMSinspector also checks the PAL layouts against the game's code. It takes every original accessor that is two instructions in `main.dol` and whose decomp body returns or assigns a single member, and compares the offset the code uses with the offset the layout gives that member. On the current decomp almost all of them agree.

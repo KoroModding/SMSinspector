@@ -16,6 +16,9 @@ public enum ProvenanceKind
 
     /// <summary>Named by another class at the same offset: that member's header line.</summary>
     Sibling,
+
+    /// <summary>A symbol of symbols.txt: the file, the mangled name and its address.</summary>
+    Symbol,
 }
 
 /// <summary>
@@ -57,6 +60,10 @@ public sealed record Provenance
 
     public static Provenance DecompBody(string file, int line, string function) =>
         new(ProvenanceKind.DecompBody, Required(file), Positive(line), null, Required(function));
+
+    /// <summary>A name read from a symbol, for example a class from its <c>__vt__</c> symbol.</summary>
+    public static Provenance Symbol(string file, string mangledName, uint address) =>
+        new(ProvenanceKind.Symbol, Required(file), null, address, Required(mangledName));
 
     /// <summary>A name borrowed from a sibling's member: that member's header line.</summary>
     public static Provenance Sibling(Provenance member, string detail) =>

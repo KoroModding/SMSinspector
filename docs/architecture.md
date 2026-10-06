@@ -2,7 +2,7 @@
 
 SMSinspector has two projects. `SMSinspector.Core` holds everything that does not draw pixels: memory access, symbols, layouts, the name extractor, and later object discovery. `SMSinspector.App` is the Avalonia front end. Tests cover Core only, against fakes, so they run anywhere without Dolphin or the game.
 
-This page grows with each milestone. Right now it covers memory access, symbols, class layouts, the name extractor and where names come from.
+This page grows with each milestone. Right now it covers memory access, symbols, class layouts, the name extractor, where names come from, and the first pass of object discovery.
 
 ## Memory access
 
@@ -180,6 +180,20 @@ The app runs the check right after loading the layouts, and the extractor runs i
 ### Report
 
 `NameExtractor` collects the candidates per member and orders them by level. `ExtractionReport` writes them as text and JSON with the source of every candidate (mangled name and size, decoded instruction or body with its file and line) and a section that counts what was read but not interpreted. The app saves it to `%APPDATA%\SMSinspector\reports\`. Like the layout report, it is never committed.
+
+## Object discovery
+
+### Vtable scan
+
+Every object of a class with virtual functions holds a pointer to its class's vtable, and the decomp names each vtable `__vt__<class>`. `VtableScanner` reads MEM1 in 256 KiB chunks and checks every aligned word against the set of vtable addresses. A match is, almost certainly, an object's vtable pointer. The check measured in M2 holds: the pointer equals the symbol's address, with no header to skip. A full scan takes about 50 ms.
+
+The vtable pointer is not always the first word of an object. A class that declares its virtual functions after its data members gets its pointer after them, and so do its subclasses: `TSpineBase<TLiveActor>` keeps it at `+0x24`. The scanner subtracts the vptr offset of the class's PAL layout to find where the object starts. Template classes are looked up through the demangled name (`TParamRT<unsigned char>`), which `LoadedLayouts.Find` parses and canonicalises, so it meets the header's spelling (`TParamRT<u8>`). A class without a layout keeps the vptr at `+0x0` and is flagged.
+
+Two kinds of words are counted but not used: pointers into the middle of a vtable, which are the secondary vptrs of classes with several polymorphic bases, and chunks that could not be read. An object inside a known symbol, such as a static nerve instance, is marked static with the symbol's name; everything else is on the heap.
+
+Each class name carries its `__vt__` symbol as provenance (kind "symbol": the file, the mangled name and the address).
+
+The scan cannot tell a live object from a freed one: freed heap memory keeps its old vtable pointers until something overwrites it. In a test in Delfino Plaza it found two `TMario` objects, one of them left over from an earlier scene. The scene graph walk, the next pass, separates what the game still uses from what it does not.
 
 ## Where names come from
 
