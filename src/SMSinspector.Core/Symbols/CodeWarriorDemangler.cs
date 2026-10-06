@@ -61,6 +61,53 @@ public static class CodeWarriorDemangler
     private static bool TryDemangleAt(string member, string encoded, [NotNullWhen(true)] out string? result)
     {
         result = null;
+        if (!TryParseAt(member, encoded, out var function))
+        {
+            return false;
+        }
+
+        var qualified = function.QualifiedName;
+        result = function.Arguments is { } args
+            ? $"{qualified}({FormatArguments(args)}){(function.IsConst ? " const" : "")}"
+            : qualified;
+        return true;
+    }
+
+    /// <summary>
+    /// Splits a mangled member function into its parts. Fails on anything that is not a
+    /// function, on thunks, and on names it cannot parse.
+    /// </summary>
+    public static bool TryParseFunction(string symbol, [NotNullWhen(true)] out DemangledFunction? function)
+    {
+        function = null;
+        if (symbol.Length == 0 || symbol[0] == '@')
+        {
+            return false;
+        }
+
+        var searchFrom = symbol.StartsWith("__", StringComparison.Ordinal) ? 2 : 1;
+        for (var split = symbol.IndexOf("__", searchFrom, StringComparison.Ordinal);
+             split >= 0 && split + 2 < symbol.Length;
+             split = symbol.IndexOf("__", split + 1, StringComparison.Ordinal))
+        {
+            if (TryParseAt(symbol[..split], symbol[(split + 2)..], out var parsed))
+            {
+                if (parsed.Arguments is null)
+                {
+                    return false;
+                }
+
+                function = parsed;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryParseAt(string member, string encoded, out DemangledFunction function)
+    {
+        function = null!;
         var pos = 0;
         if (!TryParseScope(encoded, ref pos, out var scope, out var className))
         {
@@ -75,7 +122,6 @@ public static class CodeWarriorDemangler
             "__RTTI" => "RTTI",
             _ => DemangleIdentifier(member),
         };
-        var qualified = scope.Length > 0 ? scope + "::" + name : name;
 
         var isConst = encoded.AsSpan(pos).StartsWith("CF");
         if (isConst)
@@ -85,7 +131,7 @@ public static class CodeWarriorDemangler
 
         if (pos >= encoded.Length)
         {
-            result = qualified;
+            function = new DemangledFunction(scope, name, isConst, null);
             return true;
         }
 
@@ -106,11 +152,11 @@ public static class CodeWarriorDemangler
             args.Add(arg);
         }
 
-        result = $"{qualified}({FormatArguments(args)}){(isConst ? " const" : "")}";
+        function = new DemangledFunction(scope, name, isConst, args is ["void"] ? [] : args);
         return true;
     }
 
-    private static string FormatArguments(List<string> args) => args is ["void"] ? "" : string.Join(", ", args);
+    private static string FormatArguments(IReadOnlyList<string> args) => args is ["void"] ? "" : string.Join(", ", args);
 
     /// <summary>
     /// For a vtable symbol (<c>__vt__...</c>), gives the demangled name of the class it belongs to.
@@ -424,4 +470,13 @@ public static class CodeWarriorDemangler
         type = baseType;
         return true;
     }
+}
+
+/// <summary>A demangled name split into parts.</summary>
+/// <param name="Scope">The enclosing classes and namespaces, "" for a free function: "Gfx::TCanvas".</param>
+/// <param name="Name">The member name: "draw", or the class name for a constructor.</param>
+/// <param name="Arguments">Demangled argument types, empty for "(void)"; null when the symbol is not a function.</param>
+public sealed record DemangledFunction(string Scope, string Name, bool IsConst, IReadOnlyList<string>? Arguments)
+{
+    public string QualifiedName => Scope.Length > 0 ? Scope + "::" + Name : Name;
 }

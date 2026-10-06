@@ -61,4 +61,35 @@ public class CodeWarriorDemanglerTests
     {
         Assert.False(CodeWarriorDemangler.TryGetVtableClass(symbol, out _));
     }
+
+    [Fact]
+    public void Functions_split_into_scope_name_and_arguments()
+    {
+        Assert.True(CodeWarriorDemangler.TryParseFunction("draw__Q23Gfx7TCanvasCFif", out var function));
+
+        Assert.Equal("Gfx::TCanvas", function.Scope);
+        Assert.Equal("draw", function.Name);
+        Assert.True(function.IsConst);
+        Assert.Equal(["int", "float"], function.Arguments);
+        Assert.Equal("Gfx::TCanvas::draw", function.QualifiedName);
+    }
+
+    [Fact]
+    public void Void_argument_list_is_empty()
+    {
+        Assert.True(CodeWarriorDemangler.TryParseFunction("update__9TFooActorFv", out var function));
+
+        Assert.Empty(function.Arguments!);
+        Assert.False(function.IsConst);
+    }
+
+    [Theory]
+    [InlineData("__vt__9TFooActor")]
+    [InlineData("sInstance__9TFooActor")]
+    [InlineData("@32@update__9TFooActorFv")]
+    [InlineData("plainName")]
+    public void Non_functions_are_not_parsed(string symbol)
+    {
+        Assert.False(CodeWarriorDemangler.TryParseFunction(symbol, out _));
+    }
 }
