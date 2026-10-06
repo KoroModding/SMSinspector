@@ -16,6 +16,7 @@ public class CommentOffsetCheckTests
     // Computation: mSecond at 0x10, mThird at 0x1C, mScale at 0x28, size 0x2C.
     // TRack: mPair commented at 0x06, computed at 0x08.
     // THolder holds a TPart, whose comments make it 0xC bytes and the computation 0x8; TPartUser derives from it.
+    // TEven: mB commented at 0x6, computed at 0x4, but alignment makes it 8 bytes either way.
     // TLamp: mTime commented at 0x0C, computed at 0x08, so mGlow (a 4-byte structure) moves from 0x10 to 0x0C.
     private const string Header = """
         struct TInner {
@@ -67,6 +68,7 @@ public class CommentOffsetCheckTests
         class TPartUser : public TPart {
         public:
             f32 mSpeed;
+            u16 mCount;
         };
 
         struct TRgba {
@@ -74,6 +76,18 @@ public class CommentOffsetCheckTests
             u8 g;
             u8 b;
             u8 a;
+        };
+
+        struct TEven {
+            /* 0x0 */ u32 mA;
+            /* 0x6 */ u8 mB;
+        };
+
+        class TEvenHolder {
+        public:
+            virtual void run();
+            /* 0x04 */ TEven mEven;
+            u32 mAfter;
         };
 
         class TLamp {
@@ -214,6 +228,7 @@ public class CommentOffsetCheckTests
 
         Assert.Equal($"Header comment 0x8 for mSecond contradicts the computation; computation confirmed by main.dol @0x{Text:X8} `lfs f0, 0x18(r3)` (2 functions).",
             fields.Rows.Single(r => r.Path == "mThird").Note);
+        Assert.Equal(NoteKind.Confirmed, fields.Rows.Single(r => r.Path == "mThird").NoteKind);
         Assert.Null(fields.Rows.Single(r => r.Path == "mFirst").Note);
     }
 
@@ -320,10 +335,12 @@ public class CommentOffsetCheckTests
     [Fact]
     public void A_class_deriving_from_an_unverified_base_is_tested_on_the_base_size()
     {
-        // TPart stays unverified; TPartUser's own member says how big the base is.
+        // TPart stays unverified, and its insides stay unknown under both hypotheses. TPartUser's own
+        // members say how big it is: mCount is a u16 at 0xC if TPart takes 8 bytes, where mSpeed (f32)
+        // would be if it took 0xC.
         var (engine, sources) = Setup(new Program()
-            .Method("move__9TPartUserFv", Lfs(0, 0x8))
-            .Method("stop__9TPartUserFv", Lfs(1, 0x8)));
+            .Method("move__9TPartUserFv", Lhz(0, 0xC))
+            .Method("stop__9TPartUserFv", Lhz(4, 0xC)));
 
         var result = CommentOffsetCheck.Apply(engine, sources);
 
@@ -332,6 +349,7 @@ public class CommentOffsetCheckTests
         Assert.True(cascade.IsBase);
         Assert.Equal(CommentVerdict.ComputationConfirmed, cascade.Verdict);
         Assert.Equal(0x8u, Offset(engine, "TPartUser", "mSpeed"));
+        Assert.Null(Offset(engine, "TPartUser", "mB"));
         var fields = ObjectFields.Build(engine, engine.GetLayout("TPartUser", VersionMask.Pal)!);
         Assert.Equal("Offset computed after base TPart, whose size 0x8 was settled via TPartUser.", fields.Rows.Single(r => r.Path == "mSpeed").Note);
     }
@@ -403,6 +421,28 @@ public class CommentOffsetCheckTests
         var fields = ObjectFields.Build(engine, engine.GetLayout("THolder", VersionMask.Pal)!);
         Assert.StartsWith("Size 0x8 of mPart settled via THolder (2 functions", fields.Rows.Single(r => r.Path == "mPart").Note);
         Assert.EndsWith("TPart itself stays unverified.", fields.Rows.Single(r => r.Path == "mPart").Note);
+    }
+
+    [Fact]
+    public void A_part_of_the_same_size_both_ways_keeps_it_without_being_confirmed()
+    {
+        var (engine, sources) = Setup(new Program());
+
+        var result = CommentOffsetCheck.Apply(engine, sources);
+
+        var cascade = result.Cascades.Single(c => c.ClassName == "TEvenHolder");
+        Assert.Equal(CommentVerdict.SameSizeBothWays, cascade.Verdict);
+        Assert.False(cascade.IsSettled);
+        Assert.Equal(0x8u, cascade.SettledSize);
+        Assert.Contains("not a main.dol proof", cascade.Summary());
+
+        Assert.Equal(0xCu, Offset(engine, "TEvenHolder", "mAfter"));
+        Assert.Null(Offset(engine, "TEven", "mB"));
+        var fields = ObjectFields.Build(engine, engine.GetLayout("TEvenHolder", VersionMask.Pal)!);
+        var even = fields.Rows.Single(r => r.Path == "mEven");
+        Assert.Equal(NoteKind.SameSize, even.NoteKind);
+        Assert.Contains("this is not a proof from main.dol", even.Note);
+        Assert.Equal(NoteKind.SameSize, fields.Rows.Single(r => r.Path == "mAfter").NoteKind);
     }
 
     [Fact]

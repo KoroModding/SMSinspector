@@ -5,7 +5,7 @@ These checks need a person, Dolphin and their own PAL copy of the game. They tes
 - **V1. Mario's class.** Follow `gpMarioAddress` to the object it points to. Expected: the object is identified as `TMario`.
 - **V2. Movement.** Move Mario along one axis, then the other, then jump. Expected: `mPosition` changes on the axis being moved and not on the others; during the jump, the Y component of `mVel` rises, then falls back.
 - **V3. Spot check against Dolphin.** Pick 3 fields on any objects and open each address (object address + offset) in Dolphin's memory view. Expected: Dolphin shows the same value as SMSinspector.
-- **V4. PAL-shifted classes.** Pause the game and inspect `TPauseMenu2` and `MSound`, which have PAL-only members. Expected: no value flagged by the plausibility check.
+- **V4. PAL-shifted classes.** Pause the game and inspect `TPauseMenu2` and `MSound`, which have PAL-only members. Expected: no value flagged by the plausibility check. Then inspect `TMarioGamePad` while moving the stick and pressing buttons. Expected: its own members after the `JUTGamePad` base change with the input.
 - **V5. JP calibration.** The layout computation reproduces every JP offset comment before it produces a PAL offset. Expected: the test is green in CI on the commit being validated.
 
 Each run gets one entry, newest first. A check the tool cannot run yet is marked "not available" until the feature it needs exists.

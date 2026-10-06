@@ -82,8 +82,8 @@ public static class CommentOffsetCheck
             // Open verdicts withhold sizes, which is what cascade checks look for.
             engine.SetCommentChecks([.. settledComments, .. openComments]);
             var cascades = context.CheckCascades(settledCascades.Select(c => c.ClassName).ToHashSet(StringComparer.Ordinal));
-            var newCascades = cascades.Where(c => c.IsSettled).ToList();
-            openCascades = cascades.Where(c => !c.IsSettled).ToList();
+            var newCascades = cascades.Where(c => c.SettledSize is not null).ToList();
+            openCascades = cascades.Where(c => c.SettledSize is null).ToList();
             settledCascades.AddRange(newCascades);
             if (newCascades.Count == 0 && newComments.Count == 0)
             {
@@ -243,7 +243,7 @@ public static class CommentOffsetCheck
 
             if (sizeC == sizeK)
             {
-                return new CascadeCheck(layout.Name, from, isBase, held.Name, sizeC, sizeK, CommentVerdict.Unverified, [], [], "same size by the comments and the computation");
+                return new CascadeCheck(layout.Name, from, isBase, held.Name, sizeC, sizeK, CommentVerdict.SameSizeBothWays, [], []);
             }
 
             var underComments = engine.ComputeWithMemberSize(layout, from, held.Name, sizeC);

@@ -96,6 +96,8 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
     public ClassLayout ComputeWithMemberSize(ClassLayout layout, MemberDecl from, string forcedType, uint forcedSize)
     {
         var bindings = new Bindings(layout.BoundTypes, layout.BoundValues);
+        // Only the part's size is a hypothesis: inside it, and inside other bases and members, PAL offsets
+        // stay as the engine has them, withheld ones included.
         var computed = Walk(layout.Decl, VersionMask.Jp, bindings, layout.Name, null, from, (forcedType, forcedSize));
         return layout.Version == VersionMask.Pal ? CopyForPal(computed) : computed;
     }
@@ -297,7 +299,7 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
         layout.Issues.Add(new LayoutIssue(IssueKind.PalUnverified, first?.Name ?? "", $"PAL offsets unverified after 0x{lastTrusted:X}: {reason}"));
     }
 
-    private static ClassLayout CopyForPal(ClassLayout jp)
+    private ClassLayout CopyForPal(ClassLayout jp)
     {
         var copy = new ClassLayout
         {
@@ -317,7 +319,9 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
             BoundTypes = jp.BoundTypes,
             BoundValues = jp.BoundValues,
         };
-        copy.Bases.AddRange(jp.Bases);
+        // The bases keep their offsets but show their own PAL layouts, withheld offsets included.
+        copy.Bases.AddRange(jp.Bases.Select(b => new BaseLayout(
+            GetLayout(b.Layout.Decl, VersionMask.Pal, new Bindings(b.Layout.BoundTypes, b.Layout.BoundValues), b.Layout.Name) ?? b.Layout, b.Offset)));
         copy.VirtualBases.AddRange(jp.VirtualBases);
         copy.Fields.AddRange(jp.Fields);
         copy.Issues.AddRange(jp.Issues);

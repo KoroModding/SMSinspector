@@ -31,7 +31,7 @@ public sealed class ObjectFields
     public static ObjectFields Build(LayoutEngine engine, ClassLayout layout)
     {
         var builder = new Builder(engine, layout.Version);
-        var rows = builder.Rows(layout, 0, 0, "", null, out var end);
+        var rows = builder.Rows(layout, 0, 0, "", (null, NoteKind.None), out var end);
         return new ObjectFields(layout, rows, end);
     }
 
@@ -45,7 +45,7 @@ public sealed class ObjectFields
 
         private readonly Dictionary<EnumDecl, IReadOnlyDictionary<long, string>> _enumNames = new(ReferenceEqualityComparer.Instance);
 
-        public List<FieldRow> Rows(ClassLayout layout, uint origin, int depth, string prefix, string? inheritedNote, out uint end)
+        public List<FieldRow> Rows(ClassLayout layout, uint origin, int depth, string prefix, (string? Note, NoteKind Kind) inheritedNote, out uint end)
         {
             var placed = new List<FieldRow>();
             var withheld = new List<FieldRow>();
@@ -72,12 +72,13 @@ public sealed class ObjectFields
             return result;
         }
 
-        private FieldRow Row(FlatField flat, uint origin, int depth, string prefix, string? inheritedNote)
+        private FieldRow Row(FlatField flat, uint origin, int depth, string prefix, (string? Note, NoteKind Kind) inheritedNote)
         {
             var (owner, field) = (flat.Owner, flat.Field);
             var type = engine.DescribeField(owner, field);
             var spec = engine.DeclaredType(owner, field);
             var size = field.Size ?? type.Size;
+            var (note, noteKind) = Note(owner, field, flat.AbsoluteOffset, size);
             return new FieldRow
             {
                 Kind = RowKind.Field,
@@ -92,7 +93,8 @@ public sealed class ObjectFields
                 BitOffset = field.BitOffset,
                 BitWidth = field.BitWidth,
                 Depth = depth,
-                Note = Note(owner, field, flat.AbsoluteOffset, size) ?? inheritedNote,
+                Note = note ?? inheritedNote.Note,
+                NoteKind = note is null ? inheritedNote.Kind : noteKind,
                 HasUnknownName = field.Member is not null && NameExtractor.IsUnknownName(field.Name),
                 EnumNames = type is DataType.Enumeration e ? EnumNames(e.Declaration) : null,
                 Spec = spec,
@@ -102,7 +104,7 @@ public sealed class ObjectFields
 
         private IReadOnlyList<FieldRow> Expand(FieldRow row) => row.Type switch
         {
-            DataType.Composite composite => Rows(composite.Layout, row.Offset!.Value, row.Depth + 1, row.Path, row.Note, out _),
+            DataType.Composite composite => Rows(composite.Layout, row.Offset!.Value, row.Depth + 1, row.Path, (row.Note, row.NoteKind), out _),
             DataType.ArrayOf array => Elements(row, array),
             _ => [],
         };
@@ -127,6 +129,7 @@ public sealed class ObjectFields
                     Type = array.Element,
                     Depth = row.Depth + 1,
                     Note = row.Note,
+                    NoteKind = row.NoteKind,
                     HasUnknownName = row.HasUnknownName,
                     EnumNames = enumNames,
                     Spec = spec,
@@ -138,7 +141,7 @@ public sealed class ObjectFields
         }
 
         /// <param name="nextAlign">The alignment of what follows: a gap it explains is padding.</param>
-        private static void AddGap(List<FieldRow> rows, uint from, uint to, uint nextAlign, int depth, string prefix, string? note)
+        private static void AddGap(List<FieldRow> rows, uint from, uint to, uint nextAlign, int depth, string prefix, (string? Note, NoteKind Kind) note)
         {
             var isPadding = nextAlign > 1 && to - from < nextAlign && to % nextAlign == 0;
             // Split on 16-byte lines of the object, as a hex view would.
@@ -155,40 +158,42 @@ public sealed class ObjectFields
                     TypeName = $"{next - at} bytes",
                     Type = new DataType.Opaque(next - at),
                     Depth = depth,
-                    Note = note,
+                    Note = note.Note,
+                    NoteKind = note.Kind,
                     IsPadding = isPadding,
                 });
                 at = next;
             }
         }
 
-        private static string? Note(ClassLayout owner, FieldLayout field, uint? absolute, uint size)
+        private static (string? Note, NoteKind Kind) Note(ClassLayout owner, FieldLayout field, uint? absolute, uint size)
         {
             if (owner.PalSuspect is { } suspect && field.Offset is { } offset
                 && offset <= suspect.LastOffset && offset + Math.Max(size, 1) > suspect.FirstOffset)
             {
-                return $"PAL suspect 0x{suspect.FirstOffset:X}..0x{suspect.LastOffset:X}: {suspect.Reason}";
+                return ($"PAL suspect 0x{suspect.FirstOffset:X}..0x{suspect.LastOffset:X}: {suspect.Reason}", NoteKind.PalSuspect);
             }
 
-            if (owner.CascadeCheck is { IsSettled: true } cascade && field.Offset is { } placed
+            if (owner.CascadeCheck is { SettledSize: not null } cascade && field.Offset is { } placed
                 && owner.Fields.FirstOrDefault(f => ReferenceEquals(f.Member, cascade.Member))?.Offset is { } memberOffset && placed >= memberOffset)
             {
-                return ReferenceEquals(field.Member, cascade.Member) && !cascade.IsBase ? cascade.RowNote() : cascade.AfterNote();
+                var kind = cascade.Verdict == CommentVerdict.SameSizeBothWays ? NoteKind.SameSize : NoteKind.Confirmed;
+                return (ReferenceEquals(field.Member, cascade.Member) && !cascade.IsBase ? cascade.RowNote() : cascade.AfterNote(), kind);
             }
 
             if (owner.CommentCheck is { IsSettled: true } check && field.Offset >= check.Conflict.FirstOffset)
             {
-                return check.RowNote();
+                return (check.RowNote(), NoteKind.Confirmed);
             }
 
             if (absolute is null)
             {
-                return owner.PalUnverifiedAfter is { } after
+                return (owner.PalUnverifiedAfter is { } after
                     ? $"PAL offsets unverified after 0x{after:X}: {owner.PalUnverifiedReason}"
-                    : "Offset unknown: the size of a preceding member could not be determined.";
+                    : "Offset unknown: the size of a preceding member could not be determined.", NoteKind.Withheld);
             }
 
-            return null;
+            return (null, NoteKind.None);
         }
 
         private IReadOnlyDictionary<long, string> EnumNames(EnumDecl decl)

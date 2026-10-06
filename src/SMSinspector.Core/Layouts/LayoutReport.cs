@@ -136,7 +136,8 @@ public sealed class LayoutReport
 
         if (CascadeChecks.Count > 0)
         {
-            lines.Add($"Classes holding a member of an unverified type: {CascadeChecks.Count}; member size settled for {CascadeChecks.Count(c => c.IsSettled)}.");
+            lines.Add($"Classes holding a member or base of an unverified type: {CascadeChecks.Count}; its size settled by main.dol for {CascadeChecks.Count(c => c.IsSettled)}, "
+                + $"the same by comments and computation for {CascadeChecks.Count(c => c.Verdict == CommentVerdict.SameSizeBothWays)}.");
         }
 
         return string.Join(Environment.NewLine, lines);

@@ -66,6 +66,12 @@ public enum CommentVerdict
 
     /// <summary>No discriminating evidence.</summary>
     Unverified,
+
+    /// <summary>
+    /// A cascade whose two hypotheses give the part the same size: there is nothing to decide,
+    /// so the part takes that size, but nothing from main.dol backs it.
+    /// </summary>
+    SameSizeBothWays,
 }
 
 /// <summary>How the evidence falls on one member of the checked class.</summary>
@@ -134,6 +140,7 @@ public abstract record HypothesisCheck(
         CommentVerdict.CommentConfirmed => $"{commentSide} confirmed by main.dol @0x{Proof!.Address:X8} `{Proof.Instruction}`",
         CommentVerdict.CommentProbable => $"{commentSide} probable (one function) @0x{Proof!.Address:X8} `{Proof.Instruction}`",
         CommentVerdict.Mixed => "no verdict, evidence both ways",
+        CommentVerdict.SameSizeBothWays => "same size by comments and computation (not a main.dol proof)",
         _ => "unverified",
     };
 
@@ -199,13 +206,16 @@ public sealed record CascadeCheck(
     string? Remark = null)
     : HypothesisCheck(ClassName, Verdict, Evidence, Members, Remark)
 {
-    /// <summary>The size the evidence gives the member, when settled.</summary>
+    /// <summary>The size the part takes: settled by the evidence, or the same under both hypotheses.</summary>
     public uint? SettledSize => Verdict switch
     {
         CommentVerdict.ComputationConfirmed => SizeByComputation,
         CommentVerdict.CommentConfirmed => SizeByComments,
+        CommentVerdict.SameSizeBothWays => SizeByComments,
         _ => null,
     };
+
+    private string PartName => IsBase ? $"base {MemberType}" : Member.Name;
 
     /// <summary>What was tested: "member mFoo" or "base TFoo".</summary>
     public string Part => IsBase ? $"base {MemberType}" : $"{Member.Name} of unverified type {MemberType}";
@@ -215,10 +225,12 @@ public sealed record CascadeCheck(
         + $"{VerdictText($"size 0x{SizeByComputation:X}", $"size 0x{SizeByComments:X}")}; {Counts()}{(Remark is null ? "" : $" ({Remark})")}.";
 
     /// <summary>The note on the member whose size was settled.</summary>
-    public string RowNote() =>
-        $"Size 0x{SettledSize:X} of {(IsBase ? $"base {MemberType}" : Member.Name)} settled via {ClassName} ({Math.Max(FunctionsForComputed, FunctionsForComment)} functions, @0x{Proof!.Address:X8} `{Proof.Instruction}`); {MemberType} itself stays unverified.";
+    public string RowNote() => Verdict == CommentVerdict.SameSizeBothWays
+        ? $"Size 0x{SettledSize:X} of {PartName} is the same by its comments and by the computation; this is not a proof from main.dol. {MemberType} itself stays unverified."
+        : $"Size 0x{SettledSize:X} of {PartName} settled via {ClassName} ({Math.Max(FunctionsForComputed, FunctionsForComment)} functions, @0x{Proof!.Address:X8} `{Proof.Instruction}`); {MemberType} itself stays unverified.";
 
     /// <summary>The note on the rows placed after it.</summary>
-    public string AfterNote() =>
-        $"Offset computed after {(IsBase ? $"base {MemberType}" : Member.Name)}, whose size 0x{SettledSize:X} was settled via {ClassName}.";
+    public string AfterNote() => Verdict == CommentVerdict.SameSizeBothWays
+        ? $"Offset computed after {PartName}, whose size 0x{SettledSize:X} is the same by its comments and by the computation (not a proof from main.dol)."
+        : $"Offset computed after {PartName}, whose size 0x{SettledSize:X} was settled via {ClassName}.";
 }

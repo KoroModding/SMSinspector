@@ -2,6 +2,24 @@ using SMSinspector.Core.Layouts;
 
 namespace SMSinspector.Core.Live;
 
+/// <summary>What a row's note says, so the grid can tell them apart (colour, icon).</summary>
+public enum NoteKind
+{
+    None,
+
+    /// <summary>A PAL suspect range: a hint, offsets kept.</summary>
+    PalSuspect,
+
+    /// <summary>The offset is withheld, or rests on an unverified class.</summary>
+    Withheld,
+
+    /// <summary>main.dol settled the layout here.</summary>
+    Confirmed,
+
+    /// <summary>A size both hypotheses agree on: not a proof from main.dol.</summary>
+    SameSize,
+}
+
 public enum RowKind
 {
     /// <summary>A member, or a member of a class stored inline in another one.</summary>
@@ -51,6 +69,8 @@ public sealed class FieldRow
 
     /// <summary>Why the value may be wrong whatever it holds: a PAL suspect range, or a withheld offset.</summary>
     public string? Note { get; init; }
+
+    public NoteKind NoteKind { get; init; }
 
     /// <summary>For a gap: the bytes are alignment padding before the next member or at the end of the class.</summary>
     public bool IsPadding { get; init; }
