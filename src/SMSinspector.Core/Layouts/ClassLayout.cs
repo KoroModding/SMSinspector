@@ -125,6 +125,12 @@ public sealed class ClassLayout
     /// <summary>For PAL: a hint that the layout is wrong somewhere, with its reason; offsets are kept.</summary>
     public PalSuspect? PalSuspect { get; set; }
 
+    /// <summary>Offset comments that contradict the sizes of the members before them, in member order.</summary>
+    public List<CommentConflict> CommentConflicts { get; } = [];
+
+    /// <summary>What main.dol said about the first comment conflict, when it was checked.</summary>
+    public CommentCheck? CommentCheck { get; set; }
+
     /// <summary>For a template instance: the types its parameters stand for, to resolve members typed with them.</summary>
     internal IReadOnlyDictionary<string, TypeSpec> BoundTypes { get; init; } = new Dictionary<string, TypeSpec>();
 

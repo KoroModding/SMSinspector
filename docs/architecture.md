@@ -183,6 +183,18 @@ The app runs the check right after loading the layouts, and the extractor runs i
 
 On the current decomp one class comes out: `TCardLoad`, whose PAL-only `setupTitleScreen` writes 16-bit and 8-bit values at `0x29E..0x2D1` over members the header declares as pointers.
 
+### Offset comments against the computation
+
+Sometimes an offset comment disagrees with the sizes of the members before it. The JP walk records each case as a `CommentConflict`, and the layout keeps the comment. That leaves two candidate layouts from the conflicting member on: the comments' layout, and the computation's, which `GetComputedLayout` builds by ignoring the comments from there.
+
+`CommentOffsetCheck` asks `main.dol` which one the game uses. It reads the methods of the class and of the classes derived from it, follows `this` as above, and places every load and store on both layouts. An access counts only when it fits one layout and not the other: an `lfs` that lands on an `f32` in one and on a pointer or a `u16` in the other, a 16-bit store on a 16-bit member in one and on a pointer in the other. A word move fits a float as well as an integer, since the compiler copies floats that way, so it rarely decides anything. An access that fits both is kept as non-discriminating. A strict accessor counts when its name gives the member (through the decomp's body of it, or `getFoo` for `mFoo`) and its offset is where one layout puts that member and not the other.
+
+- Discriminating accesses for the computation and none against it: the class is laid out from the computed offsets, in JP and PAL alike, since nothing in the class differs between versions there. The rows after the conflict name the proof: its address and instruction.
+- Accesses for the comments and none against them: the comments stay.
+- No discriminating access, or some each way: PAL offsets are withheld from the conflict on, as for a contradiction.
+
+A derived class often inherits its base's conflict (its first comment assumes the base's real size), so the check runs in rounds: each confirmed computation is applied, then the remaining classes are looked at again. The layout report lists every class with its conflict, the size of the gap, the verdict with its proof, and the number of accesses on each side. Symbols do not say which member functions are static, and a static one has no `this` in `r3`; each piece of evidence names its function so a reader can check it in a disassembler.
+
 ### Report
 
 `NameExtractor` collects the candidates per member and orders them by level. `ExtractionReport` writes them as text and JSON with the source of every candidate (mangled name and size, decoded instruction or body with its file and line) and a section that counts what was read but not interpreted. The app saves it to `%APPDATA%\SMSinspector\reports\`. Like the layout report, it is never committed.

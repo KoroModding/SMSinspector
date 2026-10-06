@@ -35,6 +35,9 @@ public sealed class LayoutReport
     /// <summary>PAL layouts the game's code makes suspect, with the evidence; offsets are kept.</summary>
     public IReadOnlyList<PalSuspect> PalSuspects { get; init; } = [];
 
+    /// <summary>Offset comments that contradict the computation, with what main.dol says about each.</summary>
+    public IReadOnlyList<CommentCheck> CommentChecks { get; init; } = [];
+
     public double JpMatchRate => JpCommentsChecked == 0 ? 1 : (double)JpCommentsMatched / JpCommentsChecked;
 
     public static LayoutReport Build(TypeCatalog catalog, LayoutEngine engine)
@@ -92,6 +95,7 @@ public sealed class LayoutReport
             ParseProblems = catalog.Headers.SelectMany(h => h.Problems.Select(p => (h.Path, p))).ToList(),
             PalContradictions = engine.PalContradictions.OrderBy(c => c.ClassName, StringComparer.Ordinal).ToList(),
             PalSuspects = engine.PalSuspects.OrderBy(c => c.ClassName, StringComparer.Ordinal).ToList(),
+            CommentChecks = engine.CommentChecks.OrderBy(c => c.ClassName, StringComparer.Ordinal).ToList(),
         };
     }
 
@@ -115,6 +119,14 @@ public sealed class LayoutReport
         if (PalSuspects.Count > 0)
         {
             lines.Add($"PAL suspects (PAL-only code that does not fit the layout): {string.Join(", ", PalSuspects.Select(c => c.ClassName))}.");
+        }
+
+        if (CommentChecks.Count > 0)
+        {
+            int Count(CommentVerdict verdict) => CommentChecks.Count(c => c.Verdict == verdict);
+            lines.Add($"Offset comments contradicting the computation: {CommentChecks.Count} classes; main.dol confirms the computation for "
+                + $"{Count(CommentVerdict.ComputationConfirmed)}, the comments for {Count(CommentVerdict.CommentConfirmed)}, "
+                + $"{Count(CommentVerdict.Unverified)} unverified.");
         }
 
         return string.Join(Environment.NewLine, lines);
@@ -151,6 +163,17 @@ public sealed class LayoutReport
             foreach (var suspect in PalSuspects)
             {
                 text.AppendLine($"  {suspect.ClassName} at 0x{suspect.FirstOffset:X}..0x{suspect.LastOffset:X}: {suspect.Reason}");
+            }
+        }
+
+        if (CommentChecks.Count > 0)
+        {
+            text.AppendLine();
+            text.AppendLine("== Offset comments against the computation");
+            text.AppendLine("An offset comment disagrees with the sizes of the members before it. Each load or store through this in the class's methods counts when it fits one layout and not the other. Confirmed computations are used; unverified classes have their PAL offsets withheld from the conflict on.");
+            foreach (var check in CommentChecks)
+            {
+                text.AppendLine($"  {check.Summary()}");
             }
         }
 

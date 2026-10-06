@@ -413,8 +413,10 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
                     return (loaded, LayoutCheckResult.NotRun);
                 }
 
-                // The game's code can contradict a PAL layout, or make it suspect; check before anything is shown.
+                // The game's code can settle offset comments, contradict a PAL layout, or make it suspect;
+                // check before anything is shown. Comments first: the other checks read the settled layouts.
                 var sources = NameSourceLoader.Load(decomp);
+                CommentOffsetCheck.Apply(loaded.Engine, sources);
                 var result = DolLayoutCheck.Apply(loaded.Engine, sources);
                 loaded.Engine.SetPalSuspects(PalOnlyCodeCheck.Run(loaded.Engine, sources));
                 return (loaded with { Report = LayoutReport.Build(loaded.Catalog, loaded.Engine) }, result);

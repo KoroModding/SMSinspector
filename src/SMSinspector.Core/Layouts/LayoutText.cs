@@ -54,6 +54,11 @@ public static class LayoutText
             text.AppendLine($"PAL suspect at 0x{suspect.FirstOffset:X}..0x{suspect.LastOffset:X}: {suspect.Reason}");
         }
 
+        if (layout.CommentCheck is { } check)
+        {
+            text.AppendLine($"Offset comment check: {check.Summary()}");
+        }
+
         foreach (var issue in layout.Issues.Where(i => i.Kind is not IssueKind.PalUnverified))
         {
             text.AppendLine($"note: {issue.Kind} {issue.Member}: {issue.Message}");

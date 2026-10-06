@@ -166,6 +166,11 @@ public sealed class ObjectFields
                 return $"PAL suspect 0x{suspect.FirstOffset:X}..0x{suspect.LastOffset:X}: {suspect.Reason}";
             }
 
+            if (owner.CommentCheck is { Verdict: not CommentVerdict.Unverified } check && field.Offset >= check.Conflict.FirstOffset)
+            {
+                return check.RowNote();
+            }
+
             if (absolute is null)
             {
                 return owner.PalUnverifiedAfter is { } after

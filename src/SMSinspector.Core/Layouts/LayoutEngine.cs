@@ -39,6 +39,7 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
     private readonly HashSet<(string Key, VersionMask Version)> _inProgress = [];
     private readonly Dictionary<string, PalContradiction> _palContradictions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PalSuspect> _palSuspects = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, CommentCheck> _commentChecks = new(StringComparer.Ordinal);
 
     public TypeCatalog Catalog => catalog;
 
@@ -48,20 +49,53 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
     /// <summary>Hints that a class's PAL layout is wrong somewhere; they mark the layout, offsets stay.</summary>
     public IReadOnlyCollection<PalSuspect> PalSuspects => _palSuspects.Values;
 
+    /// <summary>What main.dol said about each class whose offset comments contradict the computation.</summary>
+    public IReadOnlyCollection<CommentCheck> CommentChecks => _commentChecks.Values;
+
+    /// <summary>
+    /// Replaces the comment checks. A class whose computation main.dol confirmed is laid out
+    /// from the computed offsets on, in both versions: it has no version block there, so the
+    /// structure is the same. An unverified one has its PAL offsets withheld from the
+    /// conflict on. Every layout is computed again, since derived classes move with their bases.
+    /// </summary>
+    public void SetCommentChecks(IEnumerable<CommentCheck> checks)
+    {
+        _commentChecks.Clear();
+        foreach (var check in checks)
+        {
+            _commentChecks[check.ClassName] = check;
+        }
+
+        _cache.Clear();
+    }
+
+    /// <summary>
+    /// The layout as the sizes alone place it, ignoring offset comments from the first
+    /// conflict on: the other hypothesis to test against the game's code. Null when the class
+    /// has no conflict, or when its PAL layout has version blocks.
+    /// </summary>
+    public ClassLayout? GetComputedLayout(ClassLayout layout)
+    {
+        if (layout.CommentConflicts.Count == 0 || layout.IsVersionAffected)
+        {
+            return null;
+        }
+
+        var bindings = new Bindings(layout.BoundTypes, layout.BoundValues);
+        var computed = Walk(layout.Decl, VersionMask.Jp, bindings, layout.Name, null, layout.CommentConflicts[0].Member);
+        return layout.Version == VersionMask.Pal ? CopyForPal(computed) : computed;
+    }
+
     /// <summary>Replaces the PAL suspects; the layouts concerned are computed again on the next request.</summary>
     public void SetPalSuspects(IEnumerable<PalSuspect> suspects)
     {
-        foreach (var name in _palSuspects.Keys)
-        {
-            _cache.Remove((name, VersionMask.Pal));
-        }
-
         _palSuspects.Clear();
         foreach (var suspect in suspects)
         {
             _palSuspects[suspect.ClassName] = suspect;
-            _cache.Remove((suspect.ClassName, VersionMask.Pal));
         }
+
+        ClearPal();
     }
 
     /// <summary>
@@ -71,11 +105,6 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
     /// </summary>
     public void SetPalContradictions(IEnumerable<PalContradiction> contradictions)
     {
-        foreach (var name in _palContradictions.Keys)
-        {
-            _cache.Remove((name, VersionMask.Pal));
-        }
-
         _palContradictions.Clear();
         foreach (var contradiction in contradictions)
         {
@@ -84,8 +113,17 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
             {
                 _palContradictions[contradiction.ClassName] = contradiction;
             }
+        }
 
-            _cache.Remove((contradiction.ClassName, VersionMask.Pal));
+        ClearPal();
+    }
+
+    // Derived classes embed their bases' layouts, so a change to one class reaches others.
+    private void ClearPal()
+    {
+        foreach (var key in _cache.Keys.Where(k => k.Version == VersionMask.Pal).ToList())
+        {
+            _cache.Remove(key);
         }
     }
 
@@ -145,12 +183,14 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
 
         try
         {
+            var check = _commentChecks.GetValueOrDefault(name);
+            var recomputeFrom = check?.Verdict == CommentVerdict.ComputationConfirmed ? check.Conflict.Member : null;
             ClassLayout layout;
             if (version == VersionMask.Pal && decl.Versions.HasFlag(VersionMask.Jp) && !IsAffected(decl, bindings))
             {
                 // Untouched by version blocks: PAL is the JP layout as it is.
                 var jp = GetLayout(decl, VersionMask.Jp, bindings, displayName);
-                layout = jp is null ? Walk(decl, version, bindings, name, null) : CopyForPal(jp);
+                layout = jp is null ? Walk(decl, version, bindings, name, null, recomputeFrom) : CopyForPal(jp);
             }
             else if (version == VersionMask.Pal)
             {
@@ -160,7 +200,17 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
             }
             else
             {
-                layout = Walk(decl, version, bindings, name, null);
+                layout = Walk(decl, version, bindings, name, null, recomputeFrom);
+            }
+
+            // A withheld member type can make a class version-affected after it was checked; its verdict still holds.
+            if (check is not null)
+            {
+                layout.CommentCheck = check;
+                if (version == VersionMask.Pal && check.Verdict == CommentVerdict.Unverified)
+                {
+                    ApplyContradiction(layout, new PalContradiction(name, check.Conflict.FirstOffset, check.RowNote()));
+                }
             }
 
             if (version == VersionMask.Pal && _palContradictions.TryGetValue(name, out var contradiction))
@@ -223,6 +273,7 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
             BasesEnd = jp.BasesEnd,
             CommentsChecked = jp.CommentsChecked,
             CommentsMatched = jp.CommentsMatched,
+            CommentCheck = jp.CommentCheck,
             BoundTypes = jp.BoundTypes,
             BoundValues = jp.BoundValues,
         };
@@ -230,6 +281,7 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
         copy.VirtualBases.AddRange(jp.VirtualBases);
         copy.Fields.AddRange(jp.Fields);
         copy.Issues.AddRange(jp.Issues);
+        copy.CommentConflicts.AddRange(jp.CommentConflicts);
         return copy;
     }
 
@@ -267,8 +319,10 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
         return jp != pal || jpSize != palSize;
     }
 
-    private ClassLayout Walk(ClassDecl decl, VersionMask version, Bindings bindings, string name, ClassLayout? jp)
+    /// <param name="recomputeFrom">A member from which offset comments are ignored: main.dol showed the sizes right.</param>
+    private ClassLayout Walk(ClassDecl decl, VersionMask version, Bindings bindings, string name, ClassLayout? jp, MemberDecl? recomputeFrom = null)
     {
+        var recomputing = false;
         var layout = new ClassLayout
         {
             Identity = new SourcedName(name, Provenance.Header(decl.File, decl.Line, name == decl.QualifiedName ? "" : $"template instance {name}")),
@@ -548,7 +602,8 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
 
             uint? computed = isUnion ? 0 : cursor is { } c && sized ? AlignUp(c, memberAlign) : null;
             var comment = member.CommentOffset;
-            var native = IsNativeComment(member, version);
+            recomputing |= ReferenceEquals(member, recomputeFrom);
+            var native = IsNativeComment(member, version) && !recomputing;
             uint? offset;
             var source = OffsetSource.Computed;
             var verified = false;
@@ -565,6 +620,7 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
                     }
                     else
                     {
+                        layout.CommentConflicts.Add(new CommentConflict(name, member, comment!.Value, expected));
                         var kind = comment > expected ? IssueKind.Gap : IssueKind.Overlap;
                         layout.Issues.Add(new LayoutIssue(kind, member.Name, kind == IssueKind.Gap
                             ? $"Comment 0x{comment:X} is 0x{comment - expected:X} bytes after the computed 0x{expected:X}."

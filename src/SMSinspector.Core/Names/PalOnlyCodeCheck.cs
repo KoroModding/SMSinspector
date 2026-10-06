@@ -3,8 +3,13 @@ using SMSinspector.Core.Symbols;
 
 namespace SMSinspector.Core.Names;
 
-/// <summary>One access of a PAL-only method to its own object, decoded from main.dol.</summary>
-public sealed record ThisAccess(uint Offset, uint Width, bool IsStore, string Mnemonic);
+/// <summary>One access of a method to its own object, decoded from main.dol.</summary>
+/// <param name="Address">Where the instruction is.</param>
+/// <param name="Instruction">The instruction as a disassembler writes it, for example "lfs f1, 0x18(r31)".</param>
+public sealed record ThisAccess(uint Offset, uint Width, bool IsStore, string Mnemonic, uint Address = 0, string Instruction = "")
+{
+    public bool IsFloat => Mnemonic.StartsWith("lf", StringComparison.Ordinal) || Mnemonic.StartsWith("stf", StringComparison.Ordinal);
+}
 
 /// <summary>
 /// Looks for PAL layouts the headers probably get wrong without any version block. A method
@@ -131,7 +136,10 @@ public static class PalOnlyCodeCheck
             {
                 if (aliases.TryGetValue(ra, out var offset) && offset + displacement >= 0)
                 {
-                    result.Add(new ThisAccess((uint)(offset + displacement), form.Width, form.IsStore, form.Mnemonic));
+                    var register = form.Mnemonic.StartsWith("lf", StringComparison.Ordinal) || form.Mnemonic.StartsWith("stf", StringComparison.Ordinal) ? 'f' : 'r';
+                    var sign = displacement < 0 ? "-" : "";
+                    var text = $"{form.Mnemonic} {register}{rt}, {sign}0x{Math.Abs((int)displacement):X}(r{ra})";
+                    result.Add(new ThisAccess((uint)(offset + displacement), form.Width, form.IsStore, form.Mnemonic, at, text));
                 }
 
                 if (!form.IsStore && form.Mnemonic is not ("lfs" or "lfd"))
