@@ -45,7 +45,8 @@ public sealed record NameSources(
     bool MapUsed,
     int ParamInitCount,
     int ParamInitUnknownCount,
-    int SourceFileCount);
+    int SourceFileCount,
+    IReadOnlySet<string>? OtherVersionFunctions = null);
 
 /// <summary>
 /// Puts original names next to members the decomp still calls <c>unkXX</c> (plan 5.7). It

@@ -66,7 +66,24 @@ public static partial class NameSourceLoader
             mapUsed,
             scanned.Values.Sum(s => s.ParamInit),
             scanned.Values.Sum(s => s.ParamInitUnknown),
-            files.Count);
+            files.Count,
+            OtherVersionFunctions(decomp));
+    }
+
+    /// <summary>
+    /// The function names of the other game version's symbols.txt, to tell which functions
+    /// exist in one build only. Null when the clone has no symbols for the other version.
+    /// </summary>
+    private static IReadOnlySet<string>? OtherVersionFunctions(LoadedDecomp decomp)
+    {
+        var other = decomp.Version == Memory.GameVersion.GMSP01 ? Memory.GameVersion.GMSJ01 : Memory.GameVersion.GMSP01;
+        var path = decomp.Repository.SymbolsPath(other);
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        return SymbolFile.Load(path).Symbols.Where(s => s.Type == "function").Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
     }
 
     /// <summary>The header folders the layouts use, plus <c>src/</c> and every <c>libs/&lt;library&gt;/src/</c>.</summary>

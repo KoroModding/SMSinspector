@@ -49,6 +49,11 @@ public static class LayoutText
                 : $"PAL offsets unverified after 0x{after:X}.");
         }
 
+        if (layout.PalSuspect is { } suspect)
+        {
+            text.AppendLine($"PAL suspect at 0x{suspect.FirstOffset:X}..0x{suspect.LastOffset:X}: {suspect.Reason}");
+        }
+
         foreach (var issue in layout.Issues.Where(i => i.Kind is not IssueKind.PalUnverified))
         {
             text.AppendLine($"note: {issue.Kind} {issue.Member}: {issue.Message}");

@@ -83,7 +83,7 @@ Once Dolphin runs the game and the decomp is loaded, the **Discovery** section h
 
 The scan also finds objects the game has freed but not yet overwritten, so counts can include leftovers from an earlier scene. Scan in a level, not on the title screen, and scan again after a scene change.
 
-**Walk scene graph** follows the game's own object tree from its root, through lists and member pointers, and prints the first levels with each object's class and instance name (in Japanese, as the game stores it). It then compares with a scan: objects of graph classes that the walk did not reach are listed as "not reached (possibly stale)". The summary also counts the pointers it refused to follow and why, and says whether the object `gpMarioAddress` points to is in the graph.
+**Walk scene graph** follows the game's own object tree from its root, through lists and member pointers, and prints the first levels with each object's class and instance name (in Japanese, as the game stores it). It then compares with a scan: objects of graph classes that the walk did not reach are listed as "not reached (stale, or held by an array not followed)". Manager arrays (a `T**` with a length) are followed when the decomp names their length. The summary also counts the pointers it refused to follow and why, and says whether the object `gpMarioAddress` points to is in the graph.
 
 ### Checking the layouts against main.dol
 
@@ -92,6 +92,8 @@ With a verified `main.dol`, SMSinspector also checks the PAL layouts against the
 When they disagree, the header or the layout is wrong for PAL there. The class then shows "PAL offsets unverified after 0x..", with the method, the decoded instruction and the decomp line as the reason, and its later offsets show as `?`. The **Layouts** summary names those classes and the name report lists each disagreement. SMSinspector does not decide which side is right.
 
 The check runs when the layouts load and again on each **Run name extractor**, so a `main.dol` added later is picked up by running the extractor.
+
+A weaker signal is listed too, as "PAL suspects": methods that exist only in the PAL build and access their own object in a way the PAL layout does not fit, such as 16-bit writes into a member declared as a pointer. The layout view shows the range and the reason under the class; offsets are kept.
 
 ### Optional: the original linker map
 

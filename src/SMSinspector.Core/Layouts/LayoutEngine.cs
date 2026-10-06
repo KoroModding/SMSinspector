@@ -38,11 +38,31 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
     private readonly Dictionary<(string Key, VersionMask Version), ClassLayout?> _cache = [];
     private readonly HashSet<(string Key, VersionMask Version)> _inProgress = [];
     private readonly Dictionary<string, PalContradiction> _palContradictions = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, PalSuspect> _palSuspects = new(StringComparer.Ordinal);
 
     public TypeCatalog Catalog => catalog;
 
     /// <summary>Evidence from outside the headers that a class's PAL layout is wrong from some offset on.</summary>
     public IReadOnlyCollection<PalContradiction> PalContradictions => _palContradictions.Values;
+
+    /// <summary>Hints that a class's PAL layout is wrong somewhere; they mark the layout, offsets stay.</summary>
+    public IReadOnlyCollection<PalSuspect> PalSuspects => _palSuspects.Values;
+
+    /// <summary>Replaces the PAL suspects; the layouts concerned are computed again on the next request.</summary>
+    public void SetPalSuspects(IEnumerable<PalSuspect> suspects)
+    {
+        foreach (var name in _palSuspects.Keys)
+        {
+            _cache.Remove((name, VersionMask.Pal));
+        }
+
+        _palSuspects.Clear();
+        foreach (var suspect in suspects)
+        {
+            _palSuspects[suspect.ClassName] = suspect;
+            _cache.Remove((suspect.ClassName, VersionMask.Pal));
+        }
+    }
 
     /// <summary>
     /// Replaces the PAL contradictions. Each one withholds the PAL offsets of its class from
@@ -146,6 +166,11 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
             if (version == VersionMask.Pal && _palContradictions.TryGetValue(name, out var contradiction))
             {
                 ApplyContradiction(layout, contradiction);
+            }
+
+            if (version == VersionMask.Pal && _palSuspects.TryGetValue(name, out var suspect))
+            {
+                layout.PalSuspect = suspect;
             }
 
             _cache[key] = layout;

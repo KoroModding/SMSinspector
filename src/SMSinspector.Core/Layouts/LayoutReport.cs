@@ -32,6 +32,9 @@ public sealed class LayoutReport
     /// <summary>PAL layouts contradicted by evidence from outside the headers, such as the game's code.</summary>
     public IReadOnlyList<PalContradiction> PalContradictions { get; init; } = [];
 
+    /// <summary>PAL layouts the game's code makes suspect, with the evidence; offsets are kept.</summary>
+    public IReadOnlyList<PalSuspect> PalSuspects { get; init; } = [];
+
     public double JpMatchRate => JpCommentsChecked == 0 ? 1 : (double)JpCommentsMatched / JpCommentsChecked;
 
     public static LayoutReport Build(TypeCatalog catalog, LayoutEngine engine)
@@ -88,6 +91,7 @@ public sealed class LayoutReport
             PalAffected = affected.OrderBy(a => a.Item2.Decl.File, StringComparer.Ordinal).ThenBy(a => a.Item2.Decl.Line).ToList(),
             ParseProblems = catalog.Headers.SelectMany(h => h.Problems.Select(p => (h.Path, p))).ToList(),
             PalContradictions = engine.PalContradictions.OrderBy(c => c.ClassName, StringComparer.Ordinal).ToList(),
+            PalSuspects = engine.PalSuspects.OrderBy(c => c.ClassName, StringComparer.Ordinal).ToList(),
         };
     }
 
@@ -106,6 +110,11 @@ public sealed class LayoutReport
         if (PalContradictions.Count > 0)
         {
             lines.Add($"PAL layouts contradicted by main.dol: {string.Join(", ", PalContradictions.Select(c => c.ClassName))}.");
+        }
+
+        if (PalSuspects.Count > 0)
+        {
+            lines.Add($"PAL suspects (PAL-only code that does not fit the layout): {string.Join(", ", PalSuspects.Select(c => c.ClassName))}.");
         }
 
         return string.Join(Environment.NewLine, lines);
@@ -131,6 +140,17 @@ public sealed class LayoutReport
             foreach (var contradiction in PalContradictions)
             {
                 text.AppendLine($"  {contradiction.ClassName} from 0x{contradiction.FirstOffset:X}: {contradiction.Reason}");
+            }
+        }
+
+        if (PalSuspects.Count > 0)
+        {
+            text.AppendLine();
+            text.AppendLine("== PAL suspects");
+            text.AppendLine("PAL-only methods (in the PAL symbols, not the JP ones) access their object with widths the layout does not fit. A hint: offsets are kept.");
+            foreach (var suspect in PalSuspects)
+            {
+                text.AppendLine($"  {suspect.ClassName} at 0x{suspect.FirstOffset:X}..0x{suspect.LastOffset:X}: {suspect.Reason}");
             }
         }
 

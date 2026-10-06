@@ -413,8 +413,10 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
                     return (loaded, LayoutCheckResult.NotRun);
                 }
 
-                // The game's code can contradict a PAL layout; check before anything is shown.
-                var result = DolLayoutCheck.Apply(loaded.Engine, NameSourceLoader.Load(decomp));
+                // The game's code can contradict a PAL layout, or make it suspect; check before anything is shown.
+                var sources = NameSourceLoader.Load(decomp);
+                var result = DolLayoutCheck.Apply(loaded.Engine, sources);
+                loaded.Engine.SetPalSuspects(PalOnlyCodeCheck.Run(loaded.Engine, sources));
                 return (loaded with { Report = LayoutReport.Build(loaded.Catalog, loaded.Engine) }, result);
             });
             _layouts = layouts;

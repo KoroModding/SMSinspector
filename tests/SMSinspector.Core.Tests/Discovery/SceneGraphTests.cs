@@ -67,6 +67,15 @@ public class SceneGraphTests
         public:
             virtual void run();
         };
+
+        class TObjManager : public JDrama::TNameRef {
+        public:
+            s32 mCapacity;
+            s32 mObjNum;
+            TActor** mObjs;
+        };
+
+        class TCrowdManager : public TObjManager { };
         """;
 
     [Fact]
@@ -195,6 +204,90 @@ public class SceneGraphTests
 
         Assert.Equal(1, graph.DoublePointerMembers);
         Assert.False(graph.Contains(hidden));
+    }
+
+    [Fact]
+    public void Manager_arrays_are_followed_over_their_length_anchor()
+    {
+        var world = new World();
+        var manager = world.New("TCrowdManager", "crowd");
+        var first = world.New("TActor", "first");
+        var second = world.New("TSubActor", "second");
+        var beyond = world.New("TActor", "beyond the length");
+        var plain = world.New("TPlain", null);
+        var array = world.Alloc(16);
+        world.Put(array, first);
+        world.Put(array + 4, plain);
+        world.Put(array + 8, second);
+        world.Put(array + 12, beyond);
+        world.Set(manager, "mObjs", array);
+        world.Set(manager, "mObjNum", 3);
+        world.List(world.Root, manager);
+
+        var graph = world.Walk();
+
+        var reached = graph.Nodes.Single(n => n.Address == second);
+        Assert.Equal(EdgeKind.Array, reached.Edge);
+        Assert.Equal(2, reached.Index);
+        Assert.Equal("mObjs", reached.Via?.Value);
+        Assert.True(graph.Contains(first));
+        Assert.False(graph.Contains(beyond));
+        Assert.Equal(1, graph.Rejected[RejectReason.WrongClass]);
+        // The array is followed; only the mMany members of the two actors reached stay unfollowed.
+        Assert.Equal(2, graph.DoublePointerMembers);
+        Assert.Contains("2 through manager arrays", SceneGraphText.Describe(graph));
+    }
+
+    [Theory]
+    [InlineData("length")]
+    [InlineData("outside")]
+    [InlineData("misaligned")]
+    public void Bad_manager_arrays_are_rejected_as_a_whole(string fault)
+    {
+        var world = new World();
+        var manager = world.New("TCrowdManager", "crowd");
+        var actor = world.New("TActor", "actor");
+        var array = world.Alloc(8);
+        world.Put(array, actor);
+        world.Put(array + 4, actor);
+        world.Set(manager, "mObjNum", fault == "length" ? SceneGraphWalker.MaxArrayLength + 1 : 1u);
+        world.Set(manager, "mObjs", fault switch
+        {
+            "outside" => 0x7FFFFFF0,
+            "misaligned" => array + 2,
+            _ => array,
+        });
+        world.List(world.Root, manager);
+
+        var graph = world.Walk();
+
+        var expected = fault switch
+        {
+            "length" => RejectReason.ImplausibleLength,
+            "outside" => RejectReason.OutsideMem1,
+            _ => RejectReason.Misaligned,
+        };
+        Assert.Equal(1, graph.Rejected[expected]);
+        Assert.False(graph.Contains(actor));
+        Assert.Contains("array TCrowdManager::mObjs", graph.RejectedSamples.Single().Via);
+    }
+
+    [Fact]
+    public void A_length_anchor_with_two_arrays_is_ambiguous_and_neither_is_followed()
+    {
+        var world = new World(Headers.Replace("TActor** mObjs;", "TActor** mObjs;\n    TActor** mSpare;", StringComparison.Ordinal));
+        var manager = world.New("TCrowdManager", "crowd");
+        var actor = world.New("TActor", "actor");
+        var array = world.Alloc(4);
+        world.Put(array, actor);
+        world.Set(manager, "mObjs", array);
+        world.Set(manager, "mObjNum", 1);
+        world.List(world.Root, manager);
+
+        var graph = world.Walk();
+
+        Assert.False(graph.Contains(actor));
+        Assert.Equal(2, graph.DoublePointerMembers);
     }
 
     [Fact]

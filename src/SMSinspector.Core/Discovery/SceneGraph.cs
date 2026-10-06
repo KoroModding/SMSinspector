@@ -16,6 +16,9 @@ public enum EdgeKind
 
     /// <summary>A member pointer of the parent.</summary>
     Member,
+
+    /// <summary>An entry of the parent's manager array, a <c>T**</c> member with a length anchor.</summary>
+    Array,
 }
 
 /// <summary>An object of the scene graph.</summary>
@@ -58,6 +61,9 @@ public enum RejectReason
 
     /// <summary>The declared type has no layout or no vtable pointer, so the target cannot be checked.</summary>
     Unverifiable,
+
+    /// <summary>A manager array whose length is negative or above <see cref="SceneGraphWalker.MaxArrayLength"/>.</summary>
+    ImplausibleLength,
 }
 
 /// <param name="Declared">The type the member or list declares.</param>
@@ -98,6 +104,9 @@ public sealed record SceneGraphResult(
 public sealed class SceneGraphWalker
 {
     public const int MaxSamples = 20;
+
+    /// <summary>Above this, a manager array's length is taken as garbage and the array is rejected.</summary>
+    public const int MaxArrayLength = 4096;
     private const int MaxNameBytes = 128;
 
     private static readonly Encoding ShiftJis = CreateShiftJis();
@@ -132,7 +141,9 @@ public sealed class SceneGraphWalker
 
     private sealed record ListInfo(uint SentinelOffset, uint SizeOffset, uint NextOffset, uint ValueOffset, ClassLayout Element, SourcedName Via);
 
-    private sealed record ClassPlan(ClassLayout Layout, uint NameOffset, ListInfo? List, IReadOnlyList<MemberSlot> Members, int DoublePointers);
+    private sealed record ArrayInfo(uint PointerOffset, uint LengthOffset, ClassLayout Element, SourcedName Member);
+
+    private sealed record ClassPlan(ClassLayout Layout, uint NameOffset, ListInfo? List, IReadOnlyList<MemberSlot> Members, ArrayInfo? Array, int DoublePointers);
 
     public SceneGraphResult Walk()
     {
@@ -151,6 +162,15 @@ public sealed class SceneGraphWalker
         var cutByDepth = 0;
         string? truncated = null;
 
+        void Reject(Candidate candidate, RejectReason reason, string? actual = null)
+        {
+            rejected[reason] = rejected.GetValueOrDefault(reason) + 1;
+            if (samples.Count < MaxSamples)
+            {
+                samples.Add(new RejectedEdge(candidate.From, candidate.Target, reason, candidate.ViaText, candidate.Declared.Name, actual));
+            }
+        }
+
         void Offer(Candidate candidate, int depth)
         {
             if (candidate.Target == 0)
@@ -167,12 +187,7 @@ public sealed class SceneGraphWalker
 
             if (!TryCheck(candidate, out var layout, out var reason, out var actual, out var mismatch))
             {
-                rejected[reason] = rejected.GetValueOrDefault(reason) + 1;
-                if (samples.Count < MaxSamples)
-                {
-                    samples.Add(new RejectedEdge(candidate.From, candidate.Target, reason, candidate.ViaText, candidate.Declared.Name, actual));
-                }
-
+                Reject(candidate, reason, actual);
                 return;
             }
 
@@ -214,6 +229,11 @@ public sealed class SceneGraphWalker
             if (plan.List is { } list && !ExpandList(edge.Target, list, depth, Offer))
             {
                 sizeMismatches++;
+            }
+
+            if (plan.Array is { } array)
+            {
+                ExpandArray(edge.Target, layout, array, depth, Offer, Reject);
             }
 
             foreach (var slot in plan.Members)
@@ -386,6 +406,52 @@ public sealed class SceneGraphWalker
         return index == size;
     }
 
+    /// <summary>
+    /// Follows a manager array: the pointer must be in MEM1 and aligned, the length plausible;
+    /// otherwise the array is rejected as a whole. Each entry is then checked like any edge.
+    /// </summary>
+    private void ExpandArray(uint owner, ClassLayout layout, ArrayInfo array, int depth, Action<Candidate, int> offer, Action<Candidate, RejectReason, string?> reject)
+    {
+        if (!_memory.TryReadU32(owner + array.PointerOffset, out var pointer) || !_memory.TryReadU32(owner + array.LengthOffset, out var rawLength))
+        {
+            return;
+        }
+
+        var via = $"{layout.Name}::{array.Member.Value}";
+        var whole = new Candidate(pointer, array.Element, owner, EdgeKind.Array, array.Member, 0, $"array {via}");
+        var length = (int)rawLength;
+        if (pointer == 0 || length == 0)
+        {
+            return;
+        }
+
+        if (length < 0 || length > MaxArrayLength)
+        {
+            reject(whole with { ViaText = $"array {via} (length {length}, cap {MaxArrayLength})" }, RejectReason.ImplausibleLength, null);
+            return;
+        }
+
+        if (!GameCube.IsMem1Range(pointer, length * 4))
+        {
+            reject(whole, RejectReason.OutsideMem1, null);
+            return;
+        }
+
+        if (pointer % 4 != 0)
+        {
+            reject(whole, RejectReason.Misaligned, null);
+            return;
+        }
+
+        for (var i = 0; i < length; i++)
+        {
+            if (_memory.TryReadU32(pointer + (uint)(i * 4), out var entry))
+            {
+                offer(new Candidate(entry, array.Element, owner, EdgeKind.Array, array.Member, i, $"{via}[{i}]"), depth + 1);
+            }
+        }
+    }
+
     private ClassPlan? Plan(ClassLayout layout)
     {
         if (_plans.TryGetValue(layout.Name, out var plan))
@@ -395,7 +461,7 @@ public sealed class SceneGraphWalker
 
         var nameBase = BaseOffset(layout, _nodeLayout.Name);
         var members = new List<MemberSlot>();
-        var doublePointers = 0;
+        var doublePointers = new List<(FlatField Field, ClassLayout Pointee)>();
         foreach (var flat in layout.Flatten())
         {
             if (flat.Field.Member is not { Kind: MemberKind.Data } member || member.Type.PointerDepth == 0 || member.Type.IsFunctionPointer
@@ -411,14 +477,29 @@ public sealed class SceneGraphWalker
 
             if (member.Type.PointerDepth > 1)
             {
-                doublePointers++;
+                doublePointers.Add((flat, pointee));
                 continue;
             }
 
             members.Add(new MemberSlot(offset, (int)(size / 4), pointee, flat.Field.Identity));
         }
 
-        plan = nameBase is { } b ? new ClassPlan(layout, b + _nameOffset, ListOf(layout), members, doublePointers) : null;
+        // A T** member is followed only when its own class also holds the length anchor and
+        // declares no other T** member to graph nodes, so the length cannot belong to another array.
+        ArrayInfo? array = null;
+        var (lengthOwner, lengthName) = Anchors.Split(Anchors.ManagerArrayLength);
+        var length = layout.Flatten().FirstOrDefault(f => f.Owner.Name == lengthOwner && f.Field.Name == lengthName);
+        if (length is { AbsoluteOffset: { } lengthOffset })
+        {
+            var owned = doublePointers.Where(d => d.Field.Owner.Name == lengthOwner).ToList();
+            if (owned is [var only] && only.Field.AbsoluteOffset is { } pointerOffset)
+            {
+                array = new ArrayInfo(pointerOffset, lengthOffset, only.Pointee, only.Field.Field.Identity);
+            }
+        }
+
+        var notFollowed = doublePointers.Count - (array is null ? 0 : 1);
+        plan = nameBase is { } b ? new ClassPlan(layout, b + _nameOffset, ListOf(layout), members, array, notFollowed) : null;
         _plans[layout.Name] = plan;
         return plan;
     }
@@ -583,7 +664,7 @@ public sealed record DiscoveryMerge(IReadOnlyList<FoundObject> NotReached, IRead
 
 public static class SceneGraphText
 {
-    public const string NotReachedLabel = "not reached (possibly stale)";
+    public const string NotReachedLabel = "not reached (stale, or held by an array not followed)";
 
     public static string Describe(SceneGraphResult graph, DiscoveryMerge? merge = null, int treeDepth = 2, int topClasses = 15)
     {
@@ -594,7 +675,7 @@ public static class SceneGraphText
 
         var lines = new List<string>
         {
-            $"Scene graph: {graph.Nodes.Count:N0} objects in {graph.Elapsed.TotalMilliseconds:N0} ms, {graph.Nodes.Count(n => n.Edge == EdgeKind.List):N0} reached through lists and {graph.Nodes.Count(n => n.Edge == EdgeKind.Member):N0} through member pointers.",
+            $"Scene graph: {graph.Nodes.Count:N0} objects in {graph.Elapsed.TotalMilliseconds:N0} ms, {graph.Nodes.Count(n => n.Edge == EdgeKind.List):N0} reached through lists, {graph.Nodes.Count(n => n.Edge == EdgeKind.Member):N0} through member pointers and {graph.Nodes.Count(n => n.Edge == EdgeKind.Array):N0} through manager arrays.",
         };
 
         if (graph.Truncated is { } truncated)
@@ -613,7 +694,7 @@ public static class SceneGraphText
             lines.Add($"  {group.Count(),6:N0}  declared {group.Key.MismatchDeclared}, found {group.Key.Value}");
         }
 
-        lines.Add($"Not followed: {graph.DoublePointerMembers:N0} T** members. Null pointers: {graph.NullPointers:N0}. Lists whose length disagrees with their size: {graph.ListSizeMismatches:N0}.");
+        lines.Add($"Not followed: {graph.DoublePointerMembers:N0} T** members without a length anchor. Null pointers: {graph.NullPointers:N0}. Lists whose length disagrees with their size: {graph.ListSizeMismatches:N0}.");
 
         foreach (var sample in graph.RejectedSamples.Take(5))
         {
@@ -662,6 +743,7 @@ public static class SceneGraphText
         RejectReason.WrongClass => $"class not derived from {Anchors.GraphNode.Name}",
         RejectReason.ClassWithoutLayout => "class without a layout",
         RejectReason.Unverifiable => "declared type cannot be checked",
+        RejectReason.ImplausibleLength => "array length implausible",
         _ => reason.ToString(),
     };
 }

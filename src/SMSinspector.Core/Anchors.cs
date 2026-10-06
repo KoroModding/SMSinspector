@@ -51,10 +51,12 @@ public static class Anchors
 
     public static readonly Anchor ListNodeNext = new("JGadget::TList::TNode_::pNext_", AnchorKind.Member, "scene graph walk: list containers");
 
+    public static readonly Anchor ManagerArrayLength = new("TObjManager::mObjNum", AnchorKind.Member, "scene graph walk: length of manager arrays");
+
     public static IReadOnlyList<Anchor> All { get; } =
     [
         MarioPointer, SceneGraphInstance, SceneGraphRoot, InstanceName, Spine, CurrentNerve, PreviousNerve, NerveTime,
-        GraphNode, ListContainer, ListSize, ListSentinel, ListNodeNext,
+        GraphNode, ListContainer, ListSize, ListSentinel, ListNodeNext, ManagerArrayLength,
     ];
 
     /// <summary>"JGadget::TList::oEnd_" gives ("JGadget::TList", "oEnd_").</summary>

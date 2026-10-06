@@ -122,6 +122,9 @@ public sealed class ClassLayout
     /// <summary>Why the PAL offsets after <see cref="PalUnverifiedAfter"/> are withheld.</summary>
     public string? PalUnverifiedReason { get; set; }
 
+    /// <summary>For PAL: a hint that the layout is wrong somewhere, with its reason; offsets are kept.</summary>
+    public PalSuspect? PalSuspect { get; set; }
+
     public override string ToString() => $"{Name} ({Version})";
 }
 
@@ -155,6 +158,12 @@ public static class ClassLayoutExtensions
         }
     }
 }
+
+/// <summary>
+/// A hint, weaker than a <see cref="PalContradiction"/>, that the PAL layout of a class is
+/// wrong between two offsets. Shown with the layout and listed in the report; offsets are kept.
+/// </summary>
+public sealed record PalSuspect(string ClassName, uint FirstOffset, uint LastOffset, string Reason);
 
 /// <summary>
 /// Evidence that the PAL layout of a class is wrong from <paramref name="FirstOffset"/> on
