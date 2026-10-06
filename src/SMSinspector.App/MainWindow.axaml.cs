@@ -23,6 +23,10 @@ public partial class MainWindow : Window
 
     private void OnSaveReport(object? sender, RoutedEventArgs e) => _viewModel.SaveReport();
 
+    private async void OnRunNameExtractor(object? sender, RoutedEventArgs e) => await _viewModel.RunNameExtractorAsync();
+
+    private void OnSaveNamesReport(object? sender, RoutedEventArgs e) => _viewModel.SaveNamesReport();
+
     private void OnClassQueryKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter)

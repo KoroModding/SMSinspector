@@ -58,6 +58,18 @@
         <SelectableTextBlock Classes="mono" Text="{Binding ClassLayoutText}" IsVisible="{Binding AreLayoutsLoaded}" />
       </StackPanel>
 
+      <StackPanel Spacing="8" IsVisible="{Binding AreLayoutsLoaded}">
+        <TextBlock Classes="heading" Text="Names" Margin="0,8,0,0" />
+        <TextBlock Text="Original names from symbols, main.dol and decomp bodies, placed next to unkXX members as candidates" Opacity="0.7" TextWrapping="Wrap" />
+        <StackPanel Orientation="Horizontal" Spacing="12">
+          <Button Content="Run name extractor" Click="OnRunNameExtractor" IsEnabled="{Binding !IsExtracting}" />
+          <Button Content="Save name report" Click="OnSaveNamesReport" IsVisible="{Binding HasNames}" />
+          <SelectableTextBlock Text="{Binding NamesReportPath}" VerticalAlignment="Center" TextWrapping="Wrap" />
+        </StackPanel>
+        <SelectableTextBlock Classes="mono" Text="{Binding NamesStatus}" TextWrapping="Wrap"
+                             IsVisible="{Binding NamesStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+      </StackPanel>
+
       <StackPanel Spacing="6" IsVisible="{Binding IsConnected}">
         <TextBlock Classes="heading" Text="Mario" Margin="0,8,0,0" />
         <TextBlock Text="gpMarioAddress, followed live to the object and its vtable" Opacity="0.7" />

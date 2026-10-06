@@ -5,14 +5,15 @@ using SMSinspector.App.Settings;
 using SMSinspector.Core.Layouts;
 using SMSinspector.Core.Memory;
 using SMSinspector.Core.Memory.Windows;
+using SMSinspector.Core.Names;
 using SMSinspector.Core.Symbols;
 
 namespace SMSinspector.App.ViewModels;
 
 /// <summary>
 /// Diagnostics for the first milestones: the Dolphin connection, the decomp clone with
-/// its symbols and class layouts, and a live probe that follows gpMarioAddress to Mario
-/// and identifies the object from its vtable pointer.
+/// its symbols and class layouts, the name extractor, and a live probe that follows
+/// gpMarioAddress to Mario and identifies the object from its vtable pointer.
 /// </summary>
 public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
 {
@@ -23,6 +24,7 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer _timer;
     private volatile LoadedDecomp? _decomp;
     private LoadedLayouts? _layouts;
+    private ExtractionReport? _names;
     private AppSettings _settings;
     private bool _polling;
 
@@ -64,6 +66,18 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private string _reportPath = "";
+
+    [ObservableProperty]
+    private string _namesStatus = "";
+
+    [ObservableProperty]
+    private bool _isExtracting;
+
+    [ObservableProperty]
+    private bool _hasNames;
+
+    [ObservableProperty]
+    private string _namesReportPath = "";
 
     public DiagnosticViewModel()
     {
@@ -156,6 +170,13 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // The layout engine is not thread-safe and the extractor is using it.
+        if (IsExtracting)
+        {
+            ClassLayoutText = "The name extractor is running; try again when it is done.";
+            return;
+        }
+
         var layout = _layouts.Find(ClassQuery, VersionMask.Pal);
         ClassLayoutText = layout is null
             ? $"No class named '{ClassQuery.Trim()}' (templates need their arguments, for example TVec3<f32>)."
@@ -185,9 +206,68 @@ public sealed partial class DiagnosticViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Runs the name extractor (plan 5.7). The sources are read again on every run, so a
+    /// main.dol or linker map added to the clone is picked up without restarting.
+    /// </summary>
+    public async Task RunNameExtractorAsync()
+    {
+        if (_layouts is not { } layouts || _decomp is not { } decomp || IsExtracting)
+        {
+            return;
+        }
+
+        IsExtracting = true;
+        NamesStatus = "Reading the decomp sources and main.dol...";
+        NamesReportPath = "";
+        try
+        {
+            _names = await Task.Run(() => NameExtractor.Run(layouts.Engine, NameSourceLoader.Load(decomp)));
+            HasNames = true;
+            NamesStatus = _names.Summary();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _names = null;
+            HasNames = false;
+            NamesStatus = $"Could not read the decomp sources: {e.Message}";
+        }
+        finally
+        {
+            IsExtracting = false;
+        }
+    }
+
+    /// <summary>Writes the name extractor report, as text and JSON, to the reports folder.</summary>
+    public void SaveNamesReport()
+    {
+        if (_names is null || _decomp is not { } decomp)
+        {
+            return;
+        }
+
+        var commit = decomp.CommitHash?[..12];
+        var folder = Path.Combine(SettingsStore.DataFolder, "reports");
+        var basePath = Path.Combine(folder, $"name-report-{commit ?? "unknown"}");
+        try
+        {
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(basePath + ".txt", _names.ToText(commit));
+            File.WriteAllText(basePath + ".json", _names.ToJson(commit));
+            NamesReportPath = $"Saved to {basePath}.txt and .json";
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            NamesReportPath = $"Could not save the report: {e.Message}";
+        }
+    }
+
     private async Task LoadLayoutsAsync(DecompRepository repository)
     {
         AreLayoutsLoaded = false;
+        HasNames = false;
+        _names = null;
+        NamesStatus = "";
         LayoutStatus = "Parsing headers...";
         try
         {

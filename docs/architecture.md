@@ -1,8 +1,8 @@
 # Architecture
 
-SMSinspector has two projects. `SMSinspector.Core` holds everything that does not draw pixels: memory access, and later symbols, layouts and object discovery. `SMSinspector.App` is the Avalonia front end. Tests cover Core only, against fakes, so they run anywhere without Dolphin or the game.
+SMSinspector has two projects. `SMSinspector.Core` holds everything that does not draw pixels: memory access, symbols, layouts, the name extractor, and later object discovery. `SMSinspector.App` is the Avalonia front end. Tests cover Core only, against fakes, so they run anywhere without Dolphin or the game.
 
-This page grows with each milestone. Right now it covers memory access, symbols and class layouts.
+This page grows with each milestone. Right now it covers memory access, symbols, class layouts and the name extractor.
 
 ## Memory access
 
@@ -135,3 +135,40 @@ Otherwise the engine walks it again with the PAL members. Comments inside PAL-on
 ### Report
 
 `LayoutReport` covers every class: how many JP comments the computation reproduces, the classes whose PAL layout differs and how each member moves, and every disagreement found (gaps the header does not account for, overlaps, comments out of order, types that could not be sized). A disagreement can be a wrong comment, a wrong type in the header, or a rule this tool gets wrong; the report does not decide which. Saved from the app, it goes to `%APPDATA%\SMSinspector\reports\`, never into the repository.
+
+## Name extractor
+
+### Original names
+
+The game was compiled from code whose member names are lost, but method names survived in the symbols: `symbols.txt` has about ten thousand member functions. The linker map, when the user has it, adds the methods the linker removed. `OriginalMethods` collects both, plus methods the decomp marks with a `// UNUSED` comment (the authors copy those from the map). Only these names count as original. The decomp's headers also define accessors such as `getUnk1C()`; their authors invented them, so the extractor ignores them.
+
+A method name alone does not say which member it touches. The extractor ties it to a member in three ways, and a fourth hint comes from sibling classes.
+
+### Accessors in the executable
+
+`GameExecutable` finds `main.dol` from `object_base` and `object` in `config/GMSP01/config.yml`, the same keys the decomp's build reads. It hashes the file and compares it with the `.dol` line of `config/GMSP01/build.sha1`. A matching build is byte-identical to the original, so that line is the original's hash; any other file is refused. `DolImage` maps game addresses to file offsets through the 18 section entries in the DOL header.
+
+`AccessorDecoder` reads the code of each original method at its symbol address and accepts one shape only, two instructions:
+
+```
+lwz   r3, 0x78(r3)    load the word at this + 0x78 into the return register
+blr                   return
+```
+
+PowerPC passes `this` in `r3` and returns integers in `r3` and floats in `f1`. The decoder accepts the loads `lbz lhz lha lwz lfs lfd` into the return register and the stores `stb sth stw stfs stfd` of the first argument (`r4` or `f1`), always with `r3` as the base. The 16-bit displacement is the member offset. Anything else is classified and counted, never interpreted; that includes `addi r3, r3, d`, which returns a member's address, and two-instruction bodies of other shapes.
+
+The offset is matched against the flattened PAL layout of the method's class (bases first, as in the layout view). A link is made only when a member called `unkXX` starts exactly there. The instruction width is compared with the member's size, and a difference goes into the candidate's note.
+
+### Bodies in the decomp
+
+`SourceScanner` reads every header and source file of the clone (`include/`, `src/`, and the same folders under `libs/`) with the header lexer, keeping the tokens of one game version. It tracks namespaces and class bodies by matching braces, and records each member function definition with its class, parameters, constness and body tokens, both inline in a class and as `TClass::name(...) { ... }` outside it. It also records which declarations carry a `// UNUSED` comment, on the line before or at the end of the line.
+
+`BodyAnalyzer` keeps bodies of original methods only. A body that is exactly `return unkXX;` or `unkXX = <parameter>;` (with or without `this->`) gives a "matching" link. A body of at most two statements, without a nested block, that uses `unkXX` some other way gives an "indirect" link. A name read after another object's `.` or `->` belongs to that object and is skipped. Constructors and destructors are skipped too: they set up many members and name none of them.
+
+### Sibling offsets
+
+For each `unkXX` member a class declares, the extractor looks at the other classes with the same first base. If one of them declares a named member at the same offset with the same size, that name is a hint. Subclasses of a common base often put unrelated members at the same offset, so this level ranks last.
+
+### Report
+
+`NameExtractor` collects the candidates per member and orders them by level. `ExtractionReport` writes them as text and JSON with the source of every candidate (mangled name and size, decoded instruction or body with its file and line) and a section that counts what was read but not interpreted. The app saves it to `%APPDATA%\SMSinspector\reports\`. Like the layout report, it is never committed.

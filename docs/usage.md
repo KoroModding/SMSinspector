@@ -48,19 +48,33 @@ When PAL offsets cannot be derived safely, the layout ends with "PAL offsets unv
 
 **Save full report** writes the complete validation report, with every disagreement between the headers and the computation, to `%APPDATA%\SMSinspector\reports\layout-report-<commit>.txt`. It can be useful to the decomp project as it is.
 
-## Optional: the original linker map
+## Name extractor
 
-The original linker map adds the functions the linker removed (UNUSED), which the name extractor will use. It is not part of the decomp. If you have it, put it with your game files under `orig/GMSP01/files/` in the clone. SMSinspector looks for it at the path named by the `map:` line of `config/GMSP01/config.yml`, then for any `.MAP` file in `orig/GMSP01/files/`, and the **Decomp** section says which file it used or why it used none.
+Most members the decomp has not named yet are called `unkXX`, after their offset. Some of the game's original names survived compilation, mostly as method names. The name extractor puts those names next to the members they probably belong to. It renames nothing: each candidate is a lead for you to check in game.
 
-## Optional: the disassembly
+Click **Run name extractor** in the **Names** section once the layouts are loaded. It takes about a second. The summary says how many `unkXX` members have at least one candidate, and which sources were used or refused and why. **Save name report** writes the full list, as text and JSON, to `%APPDATA%\SMSinspector\reports\name-report-<commit>.txt` and `.json`.
 
-The name extractor can also read the string literals that each class's functions use. Those come from the disassembly the decomp produces when you build it. In the clone, with your game files extracted into `orig/GMSP01/` as the decomp's README explains, and Python and ninja installed, run:
+Each candidate has a level, strongest first:
 
-```
-python configure.py --version GMSP01
-ninja
-```
+- **dol accessor**: an original method in your `main.dol` is two instructions, a load or store at an offset from `this` followed by a return. That offset is the member. `getSpeed`, compiled to `lfs f1, 0x8(r3)` then `blr`, returns the float at `+0x8`.
+- **decomp body, matching**: the decomp's code for an original method is exactly `return unkXX;` or `unkXX = argument;`.
+- **decomp body, indirect**: the decomp's code for an original method is at most two statements and uses `unkXX` some other way.
+- **sibling offset**: another class with the same base names its own member at the same offset and size. Often a coincidence; read it as a hint.
 
-The disassembly lands in `build/GMSP01/asm/`. Without it, the name extractor skips this source and says so.
+The suggested name comes from the method: `getSpeed` suggests `mSpeed`. "Original" means the name is in `symbols.txt`, in the linker map, or marked `// UNUSED` in the decomp. Accessors that the decomp authors wrote themselves, such as `getUnk1C()`, are ignored. The report also counts everything it read but did not interpret (other code shapes, accessors on members that already have a name, long bodies), so nothing is dropped without a trace.
 
-Neither the map nor the disassembly is needed for anything that exists today; they matter once the name extractor lands.
+### Adding main.dol
+
+The dol accessor level needs the game's executable, from your own disc. The decomp expects it in `orig/GMSP01/sys/main.dol` inside the clone, and SMSinspector reads it there:
+
+1. In Dolphin, right-click Super Mario Sunshine (PAL) and open **Properties**, then the **Filesystem** tab.
+2. Right-click the disc at the top of the tree and choose **Extract System Data**.
+3. Pick `orig/GMSP01/` in your decomp clone. Dolphin writes `sys/main.dol` there, with a few other system files.
+
+Before using it, SMSinspector compares the file's SHA-1 with the one the decomp lists in `config/GMSP01/build.sha1`. If they differ (another revision, a modded executable), the extractor does not use the file and the summary says so. The file stays where you put it; SMSinspector never copies it.
+
+Run the extractor again after adding the file: it reads its sources on every run.
+
+### Optional: the original linker map
+
+The original linker map adds the functions the linker removed (UNUSED), and with them a few more original names. It is not part of the decomp. If you have it, put it with your game files under `orig/GMSP01/files/` in the clone. SMSinspector looks for it at the path named by the `map:` line of `config/GMSP01/config.yml`, then for any `.MAP` file in `orig/GMSP01/files/`. The **Decomp** section and the name report say which file was used, or why none was.
