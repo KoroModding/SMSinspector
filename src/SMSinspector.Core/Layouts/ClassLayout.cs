@@ -14,6 +14,7 @@ public enum OffsetSource
 
 /// <summary>One field of a class as laid out for one version. Offsets are relative to the class.</summary>
 /// <param name="Member">The declaration, or null for the vtable pointer the compiler adds.</param>
+/// <param name="Identity">The field's name with where it comes from: the header line, or the class for a hidden pointer.</param>
 /// <param name="CommentOffset">The offset comment as written in the header, if any.</param>
 /// <param name="CommentVerified">True when the computed offset reproduced a comment written for this version.</param>
 /// <param name="BitOffset">For a bit-field: its first bit inside the storage unit, counted from the most significant bit.</param>
@@ -24,7 +25,7 @@ public enum OffsetSource
 /// </remarks>
 public sealed record FieldLayout(
     MemberDecl? Member,
-    string Name,
+    SourcedName Identity,
     string TypeName,
     uint? Offset,
     uint? Size,
@@ -35,6 +36,8 @@ public sealed record FieldLayout(
     int? BitOffset = null,
     int? BitWidth = null)
 {
+    public string Name => Identity.Value;
+
     public bool IsVtablePointer => Member is null && Name == "vtable";
 
     public bool IsHidden => Member is null;
@@ -66,7 +69,10 @@ public sealed record LayoutIssue(IssueKind Kind, string Member, string Message);
 /// <summary>The layout of one class (or template instance) for one game version.</summary>
 public sealed class ClassLayout
 {
-    public required string Name { get; init; }
+    /// <summary>The class name with where it comes from: the header line of its definition.</summary>
+    public required SourcedName Identity { get; init; }
+
+    public string Name => Identity.Value;
 
     public required ClassDecl Decl { get; init; }
 

@@ -185,6 +185,18 @@ The app runs the check right after loading the layouts, and the extractor runs i
 
 Every class, field and symbol name SMSinspector shows comes from the user's decomp clone, read at startup. Without a clone, the window says "decomp folder required" and shows no name from the game.
 
+A name is never a bare string. `SourcedName` pairs the text with a `Provenance`, and the layout types only accept that pair: `ClassLayout.Identity` and `FieldLayout.Identity` hold it, and `Name` is a read-only view of the text. Each kind of provenance has a factory that demands the facts the user needs to check it, and rejects an empty file or a line 0:
+
+| Kind | Points at | Example |
+|---|---|---|
+| header | file and line of the declaration | a class, a member, a template instance (the template's line) |
+| compiler | the class the compiler added a hidden pointer to | `vtable`, `vbase ...` |
+| executable | address in `main.dol` and the decoded instructions | a `dol accessor` candidate |
+| decomp body | file, line and function | a `decomp body` candidate |
+| sibling | the sibling member's header line | a `sibling offset` hint |
+
+An anonymous union or struct has no name in the header; its field is labelled "(anonymous)" with the line of the `union` or `struct` keyword. Extractor candidates carry their provenance as `Candidate.Origin`, and the JSON report writes it out. `ProvenanceTests` lays out invented classes covering every case above, for JP and PAL, and fails if any name lacks a file or a line.
+
 The code holds no game name, with one exception: `Anchors.cs`. Some features have to start from a known place (the diagnostics follow `gpMarioAddress`; object discovery will start from the scene graph root; the nerve panel will read the spine fields), and those names are anchors. An anchor is only a lookup key. The file holds the name, its kind (symbol or member) and the feature that uses it, never an address, an offset or a type: those are resolved in `symbols.txt` and the headers. If an anchor does not resolve, the feature that needs it is turned off and says which anchor failed.
 
 `SourceGuardTests` enforces this. It reads every string literal under `src/` (regular, verbatim, interpolated and raw strings) and the text attributes of the XAML files, and fails on any identifier shaped like a decomp name (`TFoo`, `gpFoo`, `mFoo`, a mangled name with a `Q` scope) outside `Anchors.cs`. Comments are not checked: they may cite decomp names as examples.

@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using SMSinspector.Core;
 using SMSinspector.Core.Layouts;
 using SMSinspector.Core.Names;
 using SMSinspector.Core.Symbols;
@@ -84,9 +85,33 @@ public class NameExtractorTests
             [LinkLevel.DolAccessor, LinkLevel.DecompBodyMatching, LinkLevel.SiblingOffset],
             unk8.Candidates.Select(c => c.Level));
         Assert.Equal("mSpeed", unk8.Candidates[0].Suggestion);
-        Assert.Equal("lfs f1, 0x8(r3); blr", unk8.Candidates[0].Evidence);
+        Assert.Equal("0x80003000: lfs f1, 0x8(r3); blr", unk8.Candidates[0].Evidence);
         Assert.Contains("getSpeed__9TFooActorCFv", unk8.Candidates[0].Source);
         Assert.Equal("mHeight", unk8.Candidates[2].Suggestion);
+    }
+
+    [Fact]
+    public void Every_candidate_carries_a_provenance_to_check()
+    {
+        var unk8 = Member(Run(), "unk8");
+
+        var dol = unk8.Candidates[0].Origin;
+        Assert.Equal(ProvenanceKind.Executable, dol.Kind);
+        Assert.Equal(0x80003000u, dol.Address);
+        Assert.Equal("lfs f1, 0x8(r3); blr", dol.Detail);
+
+        var body = unk8.Candidates[1].Origin;
+        Assert.Equal(ProvenanceKind.DecompBody, body.Kind);
+        Assert.Equal("test.hpp", body.File);
+        Assert.Equal(9, body.Line);
+        Assert.Equal("TFooActor::getSpeed", body.Detail);
+
+        var sibling = unk8.Candidates[2].Origin;
+        Assert.Equal(ProvenanceKind.Sibling, sibling.Kind);
+        Assert.Equal(21, sibling.Line);
+        Assert.Equal("TBarActor::mHeight", sibling.Detail);
+
+        Assert.Equal(new SourcedName("mSpeed", dol), unk8.Candidates[0].SuggestedName);
     }
 
     [Fact]

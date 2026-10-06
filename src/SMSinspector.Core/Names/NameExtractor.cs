@@ -20,11 +20,18 @@ public enum LinkLevel
 }
 
 /// <summary>An original name put forward for an unknown member, with where it comes from.</summary>
+/// <param name="Origin">Where to check it: the address and instructions in main.dol, the decomp body, or the sibling's header line.</param>
 /// <param name="Suggestion">The member name the method suggests ("mSpeed"), or null when it suggests none.</param>
 /// <param name="Source">The method or sibling member the link comes from.</param>
 /// <param name="Evidence">What was read: the decoded instruction, the body, or the sibling classes.</param>
 /// <param name="Note">A caveat, for example an instruction width that differs from the member size.</param>
-public sealed record Candidate(LinkLevel Level, string? Suggestion, string Source, string Evidence, string? Note = null);
+public sealed record Candidate(LinkLevel Level, Provenance Origin, string? Suggestion, string Source, string Evidence, string? Note = null)
+{
+    public Provenance Origin { get; } = Origin ?? throw new ArgumentNullException(nameof(Origin));
+
+    /// <summary>The suggestion as a name paired with its provenance, the form the UI shows (plan 5.8).</summary>
+    public SourcedName? SuggestedName => Suggestion is null ? null : new SourcedName(Suggestion, Origin);
+}
 
 /// <summary>A member still called <c>unkXX</c> or <c>field_0xXX</c>, with its candidates, strongest first.</summary>
 public sealed record UnknownMember(string ClassName, string Name, string TypeName, uint Offset, uint? Size, string File, IReadOnlyList<Candidate> Candidates);
@@ -152,11 +159,13 @@ public static partial class NameExtractor
             }
 
             stats.AccessorLinked++;
+            var instructions = $"{code.Instruction}; blr";
             context.Add(unknown.Owner.Name, unknown.Field, new Candidate(
                 LinkLevel.DolAccessor,
+                Provenance.Executable(sources.Executable.ShownPath, address, instructions),
                 SuggestMemberName(method.Name),
                 $"{method.Mangled}, size 0x{method.Size:X}",
-                $"{code.Instruction}; blr",
+                $"0x{address:X8}: {instructions}",
                 note));
         }
     }
@@ -221,6 +230,7 @@ public static partial class NameExtractor
                 var method = overloads.FirstOrDefault(m => m.IsConst == body.IsConst) ?? overloads[0];
                 context.Add(field.Owner.Name, field.Field, new Candidate(
                     level,
+                    Provenance.DecompBody(body.File, body.Line, $"{body.ClassName}::{body.Name}"),
                     SuggestMemberName(body.Name),
                     method.Mangled is { } mangled ? $"{mangled} ({OriginText(method.Origin)})" : $"{body.ClassName}::{body.Name} ({OriginText(method.Origin)})",
                     $"{body.File}:{body.Line}: {{ {evidence} }}"));
@@ -249,7 +259,7 @@ public static partial class NameExtractor
                 continue;
             }
 
-            var names = new SortedDictionary<string, List<string>>(StringComparer.Ordinal);
+            var names = new SortedDictionary<string, List<(string Class, FieldLayout Field)>>(StringComparer.Ordinal);
             foreach (var sibling in siblings)
             {
                 if (sibling == layout)
@@ -267,16 +277,19 @@ public static partial class NameExtractor
                             names[field.Name] = classes = [];
                         }
 
-                        classes.Add(sibling.Name);
+                        classes.Add((sibling.Name, field));
                     }
                 }
             }
 
-            foreach (var (name, classes) in names)
+            foreach (var (name, siblingFields) in names)
             {
+                var classes = siblingFields.Select(s => s.Class).ToList();
                 var shown = classes.Count <= 3 ? string.Join(", ", classes) : $"{string.Join(", ", classes.Take(3))} and {classes.Count - 3} more";
+                var first = siblingFields[0];
                 context.Add(layout.Name, unknown.Field, new Candidate(
                     LinkLevel.SiblingOffset,
+                    Provenance.Sibling(first.Field.Identity.Source, $"{first.Class}::{name}"),
                     name,
                     $"{name} in {classes.Count} sibling class{(classes.Count == 1 ? "" : "es")}",
                     $"same base {layout.Bases[0].Layout.Name}, same offset and size: {shown}"));

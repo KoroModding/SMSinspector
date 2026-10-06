@@ -238,6 +238,14 @@ public sealed record ExtractionReport(NameSources Sources, ExtractionStats Stats
                 {
                     level = LevelText(c.Level),
                     suggestion = c.Suggestion,
+                    origin = new
+                    {
+                        kind = c.Origin.Kind,
+                        file = c.Origin.File,
+                        line = c.Origin.Line,
+                        address = c.Origin.Address is { } address ? $"0x{address:X8}" : null,
+                        detail = c.Origin.Detail,
+                    },
                     source = c.Source,
                     evidence = c.Evidence,
                     note = c.Note,

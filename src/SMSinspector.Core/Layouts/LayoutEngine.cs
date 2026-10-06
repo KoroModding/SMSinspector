@@ -172,7 +172,7 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
     {
         var copy = new ClassLayout
         {
-            Name = jp.Name,
+            Identity = jp.Identity,
             Decl = jp.Decl,
             Version = VersionMask.Pal,
             Size = jp.Size,
@@ -227,7 +227,12 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
 
     private ClassLayout Walk(ClassDecl decl, VersionMask version, Bindings bindings, string name, ClassLayout? jp)
     {
-        var layout = new ClassLayout { Name = name, Decl = decl, Version = version };
+        var layout = new ClassLayout
+        {
+            Identity = new SourcedName(name, Provenance.Header(decl.File, decl.Line, name == decl.QualifiedName ? "" : $"template instance {name}")),
+            Decl = decl,
+            Version = version,
+        };
         var isPal = version == VersionMask.Pal;
         var isUnion = decl.Kind == ClassKind.Union;
         // Keyed by reference: two identical declaration lines are still two members.
@@ -285,7 +290,7 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
         foreach (var virtualBase in directVirtualBases)
         {
             var offset = cursor is { } c ? AlignUp(c, PointerSize) : (uint?)null;
-            layout.Fields.Add(new FieldLayout(null, $"vbase {virtualBase.Name}", "void*", offset, PointerSize, PointerSize,
+            layout.Fields.Add(new FieldLayout(null, Hidden($"vbase {virtualBase.Name}", $"pointer to the virtual base {virtualBase.Name} of {name}"), "void*", offset, PointerSize, PointerSize,
                 offset is null ? OffsetSource.Unknown : OffsetSource.Computed, null, false));
             align = Math.Max(align, PointerSize);
             cursor = offset + PointerSize;
@@ -400,12 +405,19 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
 
             layout.HasVptr = true;
             layout.VptrOffset = offset;
-            layout.Fields.Add(new FieldLayout(null, "vtable", "void*", offset, PointerSize, PointerSize,
+            layout.Fields.Add(new FieldLayout(null, Hidden("vtable", $"vtable pointer of {name}"), "void*", offset, PointerSize, PointerSize,
                 offset is null ? OffsetSource.Unknown : OffsetSource.Computed, marker?.CommentOffset,
                 markerNative && cursor is not null && offset == marker!.CommentOffset));
             align = Math.Max(align, PointerSize);
             cursor = offset + PointerSize;
         }
+
+        // An anonymous union or struct is a member without a name; it gets a label, not a game name.
+        SourcedName Declared(MemberDecl member) => member.Name.Length > 0
+            ? new(member.Name, Provenance.Header(decl.File, member.Line))
+            : new("(anonymous)", Provenance.Header(decl.File, member.Line, $"anonymous {member.Type}"));
+
+        SourcedName Hidden(string fieldName, string detail) => new(fieldName, Provenance.Compiler(decl.File, decl.Line, detail));
 
         void PlaceBitField(MemberDecl member)
         {
@@ -414,7 +426,7 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
             if (!sized || width is not { } bits || bits < 0 || bits > size * 8)
             {
                 layout.Issues.Add(new LayoutIssue(IssueKind.UnknownType, member.Name, $"Bit-field {member.Name} : {member.BitWidth} could not be laid out."));
-                layout.Fields.Add(new FieldLayout(member, member.Name, member.Type.ToString(), null, null, 1, OffsetSource.Unknown, member.CommentOffset, false));
+                layout.Fields.Add(new FieldLayout(member, Declared(member), member.Type.ToString(), null, null, 1, OffsetSource.Unknown, member.CommentOffset, false));
                 cursor = null;
                 bitUnit = null;
                 return;
@@ -465,7 +477,7 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
             }
 
             align = Math.Max(align, unitAlign);
-            layout.Fields.Add(new FieldLayout(member, member.Name, member.Type.ToString(), offset, size, unitAlign,
+            layout.Fields.Add(new FieldLayout(member, Declared(member), member.Type.ToString(), offset, size, unitAlign,
                 offset is null ? OffsetSource.Unknown : OffsetSource.Computed, member.CommentOffset, verified, bitOffset, (int)bits));
         }
 
@@ -552,7 +564,7 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
                 source = OffsetSource.Unknown;
             }
 
-            layout.Fields.Add(new FieldLayout(member, member.Name, member.Type.ToString(), offset, sized ? size : null,
+            layout.Fields.Add(new FieldLayout(member, Declared(member), member.Type.ToString(), offset, sized ? size : null,
                 sized ? memberAlign : 1, source, comment, verified));
 
             if (sized)

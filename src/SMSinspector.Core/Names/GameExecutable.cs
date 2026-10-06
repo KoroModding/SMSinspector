@@ -16,8 +16,12 @@ public enum ExecutableStatus
 
 /// <param name="Image">The parsed executable; only set when the hash was verified.</param>
 /// <param name="Path">Where the executable was looked for.</param>
-public sealed record ExecutableLookup(ExecutableStatus Status, DolImage? Image, string Path, string? Sha1, string? ExpectedSha1, string Message)
+/// <param name="DisplayPath">The path as shown to the user, relative to the decomp clone.</param>
+public sealed record ExecutableLookup(ExecutableStatus Status, DolImage? Image, string Path, string? Sha1, string? ExpectedSha1, string Message, string? DisplayPath = null)
 {
+    /// <summary>The executable's name in provenance and reports: never a full local path.</summary>
+    public string ShownPath => DisplayPath ?? System.IO.Path.GetFileName(Path);
+
     public bool IsUsable => Status == ExecutableStatus.Verified && Image is not null;
 }
 
@@ -75,7 +79,7 @@ public static partial class GameExecutable
             return new ExecutableLookup(ExecutableStatus.Unreadable, null, path, actual, expectedSha1, $"{display} could not be parsed: {error}");
         }
 
-        return new ExecutableLookup(ExecutableStatus.Verified, image, path, actual, expectedSha1, $"Using {display} (SHA-1 verified).");
+        return new ExecutableLookup(ExecutableStatus.Verified, image, path, actual, expectedSha1, $"Using {display} (SHA-1 verified).", display);
     }
 
     /// <summary>
