@@ -6,9 +6,9 @@ Instead of reading `0x8123A4C0 + 0x1A4` by hand and guessing, you see the class,
 
 ## Status
 
-Early work. SMSinspector finds a running Dolphin, checks that it runs the PAL game, reads its memory, loads the symbols and class layouts from your decomp clone, and identifies Mario's object from its vtable. Its name extractor puts original method names that survived compilation next to the members the decomp still calls `unkXX`, as candidates to check in game. The window only shows diagnostics for now. Still to come, in order: object discovery, the live UI, then tools to help name fields (timeline, what changed between two moments, CSV export, evidence notes for decomp PRs).
+Early work. SMSinspector finds a running Dolphin, checks that it runs the PAL game, reads its memory, loads the symbols and class layouts from your decomp clone, finds the game's objects by their vtable pointers and walks the scene graph from its root. Its name extractor puts original method names that survived compilation next to the members the decomp still calls `unkXX`, as candidates to check in game. The window only shows diagnostics for now. Still to come, in order: the live UI, then tools to help name fields (timeline, what changed between two moments, CSV export, evidence notes for decomp PRs).
 
-Setup and use: [docs/usage.md](docs/usage.md). How it works: [docs/architecture.md](docs/architecture.md).
+Setup and use: [docs/usage.md](docs/usage.md). How it works: [docs/architecture.md](docs/architecture.md). Checks run against the live game: [docs/validation.md](docs/validation.md).
 
 ## Scope
 
