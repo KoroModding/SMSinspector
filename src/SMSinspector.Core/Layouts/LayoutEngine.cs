@@ -40,6 +40,7 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
     private readonly Dictionary<string, PalContradiction> _palContradictions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PalSuspect> _palSuspects = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CommentCheck> _commentChecks = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, CascadeCheck> _cascadeChecks = new(StringComparer.Ordinal);
 
     public TypeCatalog Catalog => catalog;
 
@@ -67,6 +68,36 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
         }
 
         _cache.Clear();
+    }
+
+    /// <summary>The checks of classes holding a member whose type is unverified.</summary>
+    public IReadOnlyCollection<CascadeCheck> CascadeChecks => _cascadeChecks.Values;
+
+    /// <summary>
+    /// Replaces the cascade checks. A settled one gives its member the size the evidence
+    /// supports and computes the holding class's offsets after it, in both versions.
+    /// </summary>
+    public void SetCascadeChecks(IEnumerable<CascadeCheck> checks)
+    {
+        _cascadeChecks.Clear();
+        foreach (var check in checks)
+        {
+            _cascadeChecks[check.ClassName] = check;
+        }
+
+        _cache.Clear();
+    }
+
+    /// <summary>
+    /// The layout as the sizes alone place it from <paramref name="from"/> on, with bases and
+    /// members of class <paramref name="forcedType"/> taking <paramref name="forcedSize"/> bytes:
+    /// one hypothesis of a cascade check.
+    /// </summary>
+    public ClassLayout ComputeWithMemberSize(ClassLayout layout, MemberDecl from, string forcedType, uint forcedSize)
+    {
+        var bindings = new Bindings(layout.BoundTypes, layout.BoundValues);
+        var computed = Walk(layout.Decl, VersionMask.Jp, bindings, layout.Name, null, from, (forcedType, forcedSize));
+        return layout.Version == VersionMask.Pal ? CopyForPal(computed) : computed;
     }
 
     /// <summary>
@@ -184,13 +215,19 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
         try
         {
             var check = _commentChecks.GetValueOrDefault(name);
-            var recomputeFrom = check?.Verdict == CommentVerdict.ComputationConfirmed ? check.Conflict.Member : null;
+            var cascade = _cascadeChecks.GetValueOrDefault(name);
+            var settled = cascade?.SettledSize is { } settledSize ? (cascade.MemberType, settledSize) : ((string, uint)?)null;
+            var recomputeFrom = settled is not null ? cascade!.Member
+                : check?.Verdict == CommentVerdict.ComputationConfirmed ? check.Conflict.Member : null;
+
+            // A settled cascade explains why the class looked version-affected: its member's type had no PAL size.
+            var sameInBothVersions = !IsAffected(decl, bindings) || (settled is not null && decl.Members.All(m => m.Versions == VersionMask.Both));
             ClassLayout layout;
-            if (version == VersionMask.Pal && decl.Versions.HasFlag(VersionMask.Jp) && !IsAffected(decl, bindings))
+            if (version == VersionMask.Pal && decl.Versions.HasFlag(VersionMask.Jp) && sameInBothVersions)
             {
                 // Untouched by version blocks: PAL is the JP layout as it is.
                 var jp = GetLayout(decl, VersionMask.Jp, bindings, displayName);
-                layout = jp is null ? Walk(decl, version, bindings, name, null, recomputeFrom) : CopyForPal(jp);
+                layout = jp is null ? Walk(decl, version, bindings, name, null, recomputeFrom, settled) : CopyForPal(jp);
             }
             else if (version == VersionMask.Pal)
             {
@@ -200,14 +237,16 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
             }
             else
             {
-                layout = Walk(decl, version, bindings, name, null, recomputeFrom);
+                layout = Walk(decl, version, bindings, name, null, recomputeFrom, settled);
             }
+
+            layout.CascadeCheck = cascade;
 
             // A withheld member type can make a class version-affected after it was checked; its verdict still holds.
             if (check is not null)
             {
                 layout.CommentCheck = check;
-                if (version == VersionMask.Pal && check.Verdict == CommentVerdict.Unverified)
+                if (version == VersionMask.Pal && !check.IsSettled && settled is null)
                 {
                     ApplyContradiction(layout, new PalContradiction(name, check.Conflict.FirstOffset, check.RowNote()));
                 }
@@ -274,6 +313,7 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
             CommentsChecked = jp.CommentsChecked,
             CommentsMatched = jp.CommentsMatched,
             CommentCheck = jp.CommentCheck,
+            CascadeCheck = jp.CascadeCheck,
             BoundTypes = jp.BoundTypes,
             BoundValues = jp.BoundValues,
         };
@@ -320,7 +360,9 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
     }
 
     /// <param name="recomputeFrom">A member from which offset comments are ignored: main.dol showed the sizes right.</param>
-    private ClassLayout Walk(ClassDecl decl, VersionMask version, Bindings bindings, string name, ClassLayout? jp, MemberDecl? recomputeFrom = null)
+    /// <param name="memberSize">Bases and members stored inline whose class is this one take this size: a cascade check's hypothesis or verdict.</param>
+    private ClassLayout Walk(ClassDecl decl, VersionMask version, Bindings bindings, string name, ClassLayout? jp,
+        MemberDecl? recomputeFrom = null, (string ClassName, uint Size)? memberSize = null)
     {
         var recomputing = false;
         var layout = new ClassLayout
@@ -380,8 +422,9 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
                 layout.VptrOffset = baseOffset + baseLayout.VptrOffset;
             }
 
-            // An empty base takes no room in the derived class.
-            var baseSize = IsEmpty(baseLayout) ? 0 : baseLayout.NonVirtualSize;
+            // An empty base takes no room in the derived class. A cascade check can impose a base's size, as for a member.
+            var baseSize = memberSize is { } imposedBase && baseLayout.Name == imposedBase.ClassName ? imposedBase.Size
+                : IsEmpty(baseLayout) ? 0 : baseLayout.NonVirtualSize;
             cursor = baseOffset + baseSize;
         }
 
@@ -589,6 +632,13 @@ public sealed partial class LayoutEngine(TypeCatalog catalog)
 
             bitUnit = null;
             var sized = !member.IsBitField & TrySize(member.Type, decl.QualifiedName, bindings, version, out var size, out var memberAlign, out var problem);
+            if (memberSize is { } imposed && !member.Type.IsPointerLike && member.Type.Dims.Count == 0
+                && ResolveClassLayout(member.Type, decl.QualifiedName, bindings, version) is { } imposedLayout && imposedLayout.Name == imposed.ClassName)
+            {
+                sized = true;
+                size = imposed.Size;
+                memberAlign = imposedLayout.Align;
+            }
             if (member.AlignAttribute is { } forced && forced > memberAlign)
             {
                 memberAlign = forced;

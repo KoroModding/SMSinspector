@@ -52,6 +52,12 @@ public sealed class FieldRow
     /// <summary>Why the value may be wrong whatever it holds: a PAL suspect range, or a withheld offset.</summary>
     public string? Note { get; init; }
 
+    /// <summary>For a gap: the bytes are alignment padding before the next member or at the end of the class.</summary>
+    public bool IsPadding { get; init; }
+
+    /// <summary>The alignment of the member's type, 1 for a gap.</summary>
+    public uint Align { get; init; } = 1;
+
     /// <summary>A member the decomp has not named yet (<c>unkXX</c>); the weaker rules skip it.</summary>
     public bool HasUnknownName { get; init; }
 

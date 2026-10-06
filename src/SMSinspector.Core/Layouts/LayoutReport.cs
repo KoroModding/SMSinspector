@@ -38,6 +38,9 @@ public sealed class LayoutReport
     /// <summary>Offset comments that contradict the computation, with what main.dol says about each.</summary>
     public IReadOnlyList<CommentCheck> CommentChecks { get; init; } = [];
 
+    /// <summary>Classes holding a member of an unverified type, tested on that member's size.</summary>
+    public IReadOnlyList<CascadeCheck> CascadeChecks { get; init; } = [];
+
     public double JpMatchRate => JpCommentsChecked == 0 ? 1 : (double)JpCommentsMatched / JpCommentsChecked;
 
     public static LayoutReport Build(TypeCatalog catalog, LayoutEngine engine)
@@ -96,6 +99,7 @@ public sealed class LayoutReport
             PalContradictions = engine.PalContradictions.OrderBy(c => c.ClassName, StringComparer.Ordinal).ToList(),
             PalSuspects = engine.PalSuspects.OrderBy(c => c.ClassName, StringComparer.Ordinal).ToList(),
             CommentChecks = engine.CommentChecks.OrderBy(c => c.ClassName, StringComparer.Ordinal).ToList(),
+            CascadeChecks = engine.CascadeChecks.OrderBy(c => c.ClassName, StringComparer.Ordinal).ToList(),
         };
     }
 
@@ -125,11 +129,34 @@ public sealed class LayoutReport
         {
             int Count(CommentVerdict verdict) => CommentChecks.Count(c => c.Verdict == verdict);
             lines.Add($"Offset comments contradicting the computation: {CommentChecks.Count} classes; main.dol confirms the computation for "
-                + $"{Count(CommentVerdict.ComputationConfirmed)}, the comments for {Count(CommentVerdict.CommentConfirmed)}, "
-                + $"{Count(CommentVerdict.Unverified)} unverified.");
+                + $"{Count(CommentVerdict.ComputationConfirmed)} ({Count(CommentVerdict.ComputationProbable)} more probable), the comments for "
+                + $"{Count(CommentVerdict.CommentConfirmed)} ({Count(CommentVerdict.CommentProbable)} more probable), "
+                + $"{Count(CommentVerdict.Mixed)} with evidence both ways, {Count(CommentVerdict.Unverified)} unverified.");
+        }
+
+        if (CascadeChecks.Count > 0)
+        {
+            lines.Add($"Classes holding a member of an unverified type: {CascadeChecks.Count}; member size settled for {CascadeChecks.Count(c => c.IsSettled)}.");
         }
 
         return string.Join(Environment.NewLine, lines);
+    }
+
+    /// <summary>Where the evidence falls, member by member, when it goes both ways.</summary>
+    private static void AppendTally(StringBuilder text, HypothesisCheck check)
+    {
+        if (check.Verdict != CommentVerdict.Mixed)
+        {
+            return;
+        }
+
+        text.AppendLine($"    {"member",-28} {"comments",-9} {"computed",-9} for computation    for comments");
+        foreach (var member in check.Members)
+        {
+            static string Hex(uint? value) => value is { } v ? $"0x{v:X}" : "?";
+            text.AppendLine($"    {member.Member,-28} {Hex(member.CommentOffset),-9} {Hex(member.ComputedOffset),-9} "
+                + $"{$"{member.ForComputed} ({member.FunctionsForComputed} fn)",-18} {member.ForComment} ({member.FunctionsForComment} fn)");
+        }
     }
 
     public string ToText(string? decompCommit = null)
@@ -174,6 +201,19 @@ public sealed class LayoutReport
             foreach (var check in CommentChecks)
             {
                 text.AppendLine($"  {check.Summary()}");
+                AppendTally(text, check);
+            }
+        }
+
+        if (CascadeChecks.Count > 0)
+        {
+            text.AppendLine();
+            text.AppendLine("== Members of unverified types");
+            text.AppendLine("A class holds a member whose type's own offsets are unverified. The class is tested on that member's size, by the type's comments and by the computation, with accesses through the class only. When it settles, the member takes that size; its type stays unverified.");
+            foreach (var check in CascadeChecks)
+            {
+                text.AppendLine($"  {check.Summary()}");
+                AppendTally(text, check);
             }
         }
 

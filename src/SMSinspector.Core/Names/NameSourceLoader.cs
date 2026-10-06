@@ -23,11 +23,17 @@ public static partial class NameSourceLoader
             .ToList();
 
         var scanned = new ConcurrentDictionary<int, (ScannedSource Source, int ParamInit, int ParamInitUnknown)>();
+        var prototypes = new ConcurrentBag<FreeFunctions.Prototype>();
         Parallel.For(0, files.Count, i =>
         {
             var relative = Path.GetRelativePath(repository.Root, files[i]).Replace('\\', '/');
             var text = File.ReadAllText(files[i]);
             var paramInit = ParamInitUse().Matches(text);
+            foreach (var prototype in FreeFunctions.Scan(relative, text))
+            {
+                prototypes.Add(prototype);
+            }
+
             scanned[i] = (
                 SourceScanner.Scan(relative, text, version),
                 paramInit.Count,
@@ -67,7 +73,8 @@ public static partial class NameSourceLoader
             scanned.Values.Sum(s => s.ParamInit),
             scanned.Values.Sum(s => s.ParamInitUnknown),
             files.Count,
-            OtherVersionFunctions(decomp));
+            OtherVersionFunctions(decomp),
+            FreeFunctions.Build(decomp.Symbols, prototypes));
     }
 
     /// <summary>

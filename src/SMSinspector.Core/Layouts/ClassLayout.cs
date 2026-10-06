@@ -131,6 +131,9 @@ public sealed class ClassLayout
     /// <summary>What main.dol said about the first comment conflict, when it was checked.</summary>
     public CommentCheck? CommentCheck { get; set; }
 
+    /// <summary>What main.dol said about the size of a member whose type is unverified, when it was checked.</summary>
+    public CascadeCheck? CascadeCheck { get; set; }
+
     /// <summary>For a template instance: the types its parameters stand for, to resolve members typed with them.</summary>
     internal IReadOnlyDictionary<string, TypeSpec> BoundTypes { get; init; } = new Dictionary<string, TypeSpec>();
 

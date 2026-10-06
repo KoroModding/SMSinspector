@@ -46,7 +46,8 @@ public sealed record NameSources(
     int ParamInitCount,
     int ParamInitUnknownCount,
     int SourceFileCount,
-    IReadOnlySet<string>? OtherVersionFunctions = null);
+    IReadOnlySet<string>? OtherVersionFunctions = null,
+    IReadOnlyList<FreeFunction>? FreeFunctions = null);
 
 /// <summary>
 /// Puts original names next to members the decomp still calls <c>unkXX</c> (plan 5.7). It

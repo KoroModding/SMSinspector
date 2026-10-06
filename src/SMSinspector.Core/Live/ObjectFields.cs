@@ -61,12 +61,12 @@ public sealed class ObjectFields
             var cursor = origin;
             foreach (var row in placed)
             {
-                AddGap(result, cursor, Math.Min(row.Offset!.Value, end), depth, prefix, inheritedNote);
+                AddGap(result, cursor, Math.Min(row.Offset!.Value, end), row.Align, depth, prefix, inheritedNote);
                 result.Add(row);
                 cursor = Math.Max(cursor, row.Offset!.Value + row.Size);
             }
 
-            AddGap(result, cursor, end, depth, prefix, inheritedNote);
+            AddGap(result, cursor, end, layout.Align, depth, prefix, inheritedNote);
             result.AddRange(withheld);
             end -= origin;
             return result;
@@ -88,6 +88,7 @@ public sealed class ObjectFields
                 Size = size,
                 TypeName = spec?.ToString() ?? field.TypeName,
                 Type = type,
+                Align = field.Align,
                 BitOffset = field.BitOffset,
                 BitWidth = field.BitWidth,
                 Depth = depth,
@@ -136,8 +137,10 @@ public sealed class ObjectFields
             return elements;
         }
 
-        private static void AddGap(List<FieldRow> rows, uint from, uint to, int depth, string prefix, string? note)
+        /// <param name="nextAlign">The alignment of what follows: a gap it explains is padding.</param>
+        private static void AddGap(List<FieldRow> rows, uint from, uint to, uint nextAlign, int depth, string prefix, string? note)
         {
+            var isPadding = nextAlign > 1 && to - from < nextAlign && to % nextAlign == 0;
             // Split on 16-byte lines of the object, as a hex view would.
             for (var at = from; at < to;)
             {
@@ -153,6 +156,7 @@ public sealed class ObjectFields
                     Type = new DataType.Opaque(next - at),
                     Depth = depth,
                     Note = note,
+                    IsPadding = isPadding,
                 });
                 at = next;
             }
@@ -166,7 +170,13 @@ public sealed class ObjectFields
                 return $"PAL suspect 0x{suspect.FirstOffset:X}..0x{suspect.LastOffset:X}: {suspect.Reason}";
             }
 
-            if (owner.CommentCheck is { Verdict: not CommentVerdict.Unverified } check && field.Offset >= check.Conflict.FirstOffset)
+            if (owner.CascadeCheck is { IsSettled: true } cascade && field.Offset is { } placed
+                && owner.Fields.FirstOrDefault(f => ReferenceEquals(f.Member, cascade.Member))?.Offset is { } memberOffset && placed >= memberOffset)
+            {
+                return ReferenceEquals(field.Member, cascade.Member) && !cascade.IsBase ? cascade.RowNote() : cascade.AfterNote();
+            }
+
+            if (owner.CommentCheck is { IsSettled: true } check && field.Offset >= check.Conflict.FirstOffset)
             {
                 return check.RowNote();
             }

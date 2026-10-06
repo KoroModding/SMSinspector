@@ -15,7 +15,19 @@ public sealed partial class LayoutEngine
         }
 
         var bindings = new Bindings(owner.BoundTypes, owner.BoundValues);
-        return Describe(member.Type, owner.Decl.QualifiedName, bindings, owner.Version, 0) ?? new DataType.Opaque(field.Size ?? 0);
+        if (Describe(member.Type, owner.Decl.QualifiedName, bindings, owner.Version, 0) is { } described)
+        {
+            return described;
+        }
+
+        // A class whose own size is withheld can still have a known size as a member (a settled cascade).
+        if (field.Size is { } size && !member.Type.IsPointerLike && member.Type.Dims.Count == 0
+            && ResolveClassLayout(member.Type, owner.Decl.QualifiedName, bindings, owner.Version) is { } layout)
+        {
+            return new DataType.Composite(layout, size);
+        }
+
+        return new DataType.Opaque(field.Size ?? 0);
     }
 
     /// <summary>

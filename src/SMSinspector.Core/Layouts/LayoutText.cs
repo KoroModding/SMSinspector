@@ -59,6 +59,11 @@ public static class LayoutText
             text.AppendLine($"Offset comment check: {check.Summary()}");
         }
 
+        if (layout.CascadeCheck is { } cascade)
+        {
+            text.AppendLine($"Member size check: {cascade.Summary()}");
+        }
+
         foreach (var issue in layout.Issues.Where(i => i.Kind is not IssueKind.PalUnverified))
         {
             text.AppendLine($"note: {issue.Kind} {issue.Member}: {issue.Message}");

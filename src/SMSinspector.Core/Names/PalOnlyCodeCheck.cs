@@ -70,9 +70,11 @@ public static class PalOnlyCodeCheck
     /// <summary>
     /// Accesses relative to <c>this</c>, reading the code in order. <c>this</c> starts in r3 and
     /// may be copied with <c>mr</c> or <c>addi</c>; volatile registers are lost at a call. Branches are
-    /// not followed, so this is an approximation that errs towards missing accesses.
+    /// not followed, so this is an approximation that errs towards missing accesses. With
+    /// <paramref name="withAddresses"/>, an <c>addi</c> that takes the address of a member is
+    /// listed too, as an access of width 0.
     /// </summary>
-    public static List<ThisAccess> Accesses(uint address, uint size, Func<uint, uint?> readWord)
+    public static List<ThisAccess> Accesses(uint address, uint size, Func<uint, uint?> readWord, bool withAddresses = false)
     {
         var result = new List<ThisAccess>();
 
@@ -122,6 +124,12 @@ public static class PalOnlyCodeCheck
             {
                 if (ra != 0 && aliases.TryGetValue(ra, out var baseOffset) && baseOffset + displacement >= 0)
                 {
+                    if (withAddresses && displacement != 0)
+                    {
+                        var sign = displacement < 0 ? "-" : "";
+                        result.Add(new ThisAccess((uint)(baseOffset + displacement), 0, false, "addi", at, $"addi r{rt}, r{ra}, {sign}0x{Math.Abs((int)displacement):X}"));
+                    }
+
                     aliases[rt] = (uint)(baseOffset + displacement);
                 }
                 else
